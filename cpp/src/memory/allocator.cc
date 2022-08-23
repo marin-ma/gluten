@@ -16,6 +16,8 @@
  */
 
 #include "allocator.h"
+#include <hbwmalloc.h>
+#include <iostream>
 
 bool gluten::memory::ListenableMemoryAllocator::Allocate(
     int64_t size,
@@ -214,9 +216,85 @@ std::string gluten::memory::WrappedArrowMemoryPool::backend_name() const {
   return "gluten allocator";
 }
 
+
+namespace gluten {
+namespace memory {
+
+bool HbwMemoryAllocator::Allocate(int64_t size, void** out) {
+  *out = hbw_malloc(size);
+  bytes_ += size;
+  return true;
+}
+
+bool HbwMemoryAllocator::AllocateZeroFilled(
+    int64_t nmemb,
+    int64_t size,
+    void** out) {
+  *out = hbw_calloc(nmemb, size);
+  bytes_ += size;
+  return true;
+}
+
+bool HbwMemoryAllocator::AllocateAligned(
+    uint16_t alignment,
+    int64_t size,
+    void** out) {
+  if (hbw_posix_memalign(out, alignment, size) != 0) {
+    return false;
+  }
+  bytes_ += size;
+  return true;
+}
+
+bool HbwMemoryAllocator::Reallocate(
+    void* p,
+    int64_t size,
+    int64_t new_size,
+    void** out) {
+  *out = hbw_realloc(p, new_size);
+  bytes_ += (new_size - size);
+  return true;
+}
+
+bool HbwMemoryAllocator::ReallocateAligned(
+    void* p,
+    uint16_t alignment,
+    int64_t size,
+    int64_t new_size,
+    void** out) {
+  if (new_size <= 0) {
+    return false;
+  }
+  if (hbw_posix_memalign(out, alignment, new_size) != 0) {
+    return false;
+  }
+  memcpy(out, p, std::min(size, new_size));
+  hbw_free(p);
+  bytes_ += (new_size - size);
+  return true;
+}
+
+bool HbwMemoryAllocator::Free(void* p, int64_t size) {
+  hbw_free(p);
+  bytes_ -= size;
+  return true;
+}
+
+int64_t HbwMemoryAllocator::GetBytes() {
+  return bytes_;
+}
+
+} // namespace memory
+} // namespace gluten
+
 std::shared_ptr<gluten::memory::MemoryAllocator>
 gluten::memory::DefaultMemoryAllocator() {
+#if defined(GLUTEN_ENABLE_HBM) 
+  static std::shared_ptr<MemoryAllocator> alloc =
+      std::make_shared<HbwMemoryAllocator>();
+#else
   static std::shared_ptr<MemoryAllocator> alloc =
       std::make_shared<StdMemoryAllocator>();
+#endif
   return alloc;
 }

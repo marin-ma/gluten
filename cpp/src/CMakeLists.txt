@@ -28,12 +28,6 @@ set(CMAKE_CXX_STANDARD 14)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(BUILD_PROTOBUF "Build Protobuf from Source" ON)
-option(USE_AVX512 "Build with AVX-512 optimizations" OFF)
-option(TESTS "Build the tests" OFF)
-option(BENCHMARKS "Build the benchmarks" OFF)
-option(BUILD_JEMALLOC "Build Jemalloc from Source" OFF)
-
 set(BOOST_MIN_VERSION "1.42.0")
 find_package(Boost REQUIRED)
 INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
@@ -246,6 +240,18 @@ add_dependencies(spark_columnar_jni jni_proto)
 find_arrow_lib(${ARROW_LIB_NAME})
 find_arrow_lib(${ARROW_DATASET_JNI_LIB_NAME}) # some jni utils were imported from dataset module.
 find_arrow_lib(${GANDIVA_LIB_NAME})
+
+if(ENABLE_HBM)
+  find_library(MEMKIND_LIBRARY memkind)
+  if(MEMKIND_LIBRARY STREQUAL "MEMKIND_LIBRARY-NOTFOUND")
+    message(FATAL_ERROR "Memkind Library Not Found")
+  endif()
+  message(STATUS "Found Memkind Library: ${MEMKIND_LIBRARY}")
+  target_link_libraries(spark_columnar_jni
+                        PUBLIC ${MEMKIND_LIBRARY})
+  add_definitions(-DGLUTEN_ENABLE_HBM)
+  list(APPEND SPARK_COLUMNAR_PLUGIN_SRCS memory/hbw_allocator.cc)
+endif()
 
 if(BUILD_PROTOBUF)
   build_protobuf()
