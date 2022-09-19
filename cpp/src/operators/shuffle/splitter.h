@@ -25,6 +25,7 @@
 #include <gandiva/gandiva_aliases.h>
 #include <gandiva/projector.h>
 
+#include <arrow/util/thread_pool.h>
 #include <numeric>
 #include <random>
 #include <utility>
@@ -35,6 +36,8 @@
 
 namespace gluten {
 namespace shuffle {
+
+arrow::internal::ThreadPool* GetCompressionThreadPool();
 
 class Splitter {
  protected:
@@ -137,6 +140,10 @@ class Splitter {
     return total_compute_pid_time_;
   }
 
+  int64_t TotalSyncWaitTime() const {
+    return total_sync_wait_time_;
+  }
+
   const std::vector<int64_t>& PartitionLengths() const {
     return partition_lengths_;
   }
@@ -162,7 +169,20 @@ class Splitter {
       SplitOptions options)
       : num_partitions_(num_partitions),
         schema_(std::move(schema)),
-        options_(std::move(options)) {}
+        options_(std::move(options)) {
+    if (options_.async_compress) {
+      auto maybe_pool = arrow::internal::ThreadPool::Make(
+          options_.compression_thread_pool_size);
+      if (!maybe_pool.ok()) {
+        maybe_pool.status().Warn("Failed to create compression thread pool");
+        options_.async_compress = false;
+      } else {
+        std::cout << "Created compression thread pool with size "
+                  << options_.compression_thread_pool_size << std::endl;
+        compression_thread_pool_ = *std::move(maybe_pool);
+      }
+    }
+  }
 
   virtual arrow::Status Init();
 
@@ -218,6 +238,10 @@ class Splitter {
       const std::vector<std::shared_ptr<arrow::ArrayBuilder>>& dst_builders,
       int64_t num_rows);
 
+  arrow::Result<std::shared_ptr<arrow::RecordBatch>> MakeRecordBatch(
+      int32_t partition_id,
+      bool reset_buffers);
+
   // Cache the partition buffer/builder as compressed record batch. If reset
   // buffers, the partition buffer/builder will be set to nullptr. Two cases for
   // caching the partition buffers as record batch:
@@ -225,12 +249,16 @@ class Splitter {
   // buffer can hold all data according to partition id. If not, call this
   // method and allocate new buffers. Spill will happen if OOM.
   // 2. Stop the splitter. The record batch will be written to disk immediately.
-  arrow::Status CacheRecordBatch(int32_t partition_id, bool reset_buffers);
+  arrow::Status CacheRecordBatchPayload(
+      int32_t partition_id,
+      const std::shared_ptr<arrow::RecordBatch>& batch);
 
   // Allocate new partition buffer/builder.
   // If successful, will point partition buffer/builder to new ones, otherwise
   // will spill the largest partition and retry
-  arrow::Status AllocateNew(int32_t partition_id, int32_t new_size);
+  arrow::Status AllocatePartitionBuffersWithRetry(
+      int32_t partition_id,
+      int32_t new_size);
 
   // Allocate new partition buffer/builder. May return OOM status.
   arrow::Status AllocatePartitionBuffers(
@@ -240,6 +268,10 @@ class Splitter {
   std::string NextSpilledFileDir();
 
   arrow::Result<std::shared_ptr<arrow::ipc::IpcPayload>> GetSchemaPayload();
+
+  inline void CreatePartitionWriterIfNeeded(int32_t partition_id);
+
+  inline void WaitForLastBatch();
 
   class PartitionWriter;
 
@@ -314,12 +346,13 @@ class Splitter {
   // write options for tiny batches
   arrow::ipc::IpcWriteOptions tiny_bach_write_options_;
 
-  int64_t total_bytes_written_ = 0;
-  int64_t total_bytes_spilled_ = 0;
-  int64_t total_write_time_ = 0;
-  int64_t total_spill_time_ = 0;
-  int64_t total_compress_time_ = 0;
+  std::atomic_int64_t total_bytes_written_{0};
+  std::atomic_int64_t total_bytes_spilled_{0};
+  std::atomic_int64_t total_write_time_{0};
+  std::atomic_int64_t total_spill_time_{0};
+  std::atomic_int64_t total_compress_time_{0};
   int64_t total_compute_pid_time_ = 0;
+  int64_t total_sync_wait_time_ = 0;
   int64_t peak_memory_allocated_ = 0;
 
   std::vector<int64_t> partition_lengths_;
@@ -336,6 +369,8 @@ class Splitter {
 
   // shared by all partition writers
   std::shared_ptr<arrow::ipc::IpcPayload> schema_payload_;
+
+  std::shared_ptr<arrow::internal::ThreadPool> compression_thread_pool_;
 };
 
 class RoundRobinSplitter : public Splitter {
@@ -364,6 +399,12 @@ class HashSplitter : public Splitter {
       int32_t num_partitions,
       std::shared_ptr<arrow::Schema> schema,
       const substrait::Rel& subRel,
+      SplitOptions options);
+
+  static arrow::Result<std::shared_ptr<HashSplitter>> Create(
+      int32_t num_partitions,
+      std::shared_ptr<arrow::Schema> schema,
+      std::vector<std::shared_ptr<gandiva::Expression>> expr_vector,
       SplitOptions options);
 
  private:
