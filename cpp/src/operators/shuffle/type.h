@@ -31,7 +31,7 @@ namespace shuffle {
 
 static constexpr int32_t kDefaultSplitterBufferSize = 4096;
 static constexpr int32_t kDefaultNumSubDirs = 64;
-static constexpr int32_t kDefaultBatchCompressThreshold = 0;
+static constexpr int32_t kDefaultBatchCompressThreshold = 256;
 static constexpr int32_t kDefaultCompressionThreadPoolSize = 1;
 
 // This 0xFFFFFFFF value is the first 4 bytes of a valid IPC message
@@ -51,6 +51,7 @@ struct SplitOptions {
   int32_t buffer_size = kDefaultSplitterBufferSize;
   int32_t num_sub_dirs = kDefaultNumSubDirs;
   int32_t batch_compress_threshold = kDefaultBatchCompressThreshold;
+  int32_t qat_compress_threshold = -1;
   int32_t compression_thread_pool_size = kDefaultCompressionThreadPoolSize;
 
   arrow::Compression::type compression_type = arrow::Compression::UNCOMPRESSED;

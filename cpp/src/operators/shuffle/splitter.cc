@@ -387,7 +387,6 @@ arrow::Status Splitter::Init() {
        strcmp(async_compression_enabled, "true") == 0)) {
     options_.async_compress = true;
   }
-
   auto& ipc_write_options = options_.ipc_write_options;
   ipc_write_options.memory_pool = options_.memory_pool.get();
   ipc_write_options.use_threads = false;
@@ -395,6 +394,18 @@ arrow::Status Splitter::Init() {
   // initialize tiny batch write options
   tiny_bach_write_options_ = ipc_write_options;
   tiny_bach_write_options_.codec = nullptr;
+
+  // Get QAT compression threshold
+  auto qat_compress_threshold = 
+      std::getenv("GLUTEN_QAT_COMPRESS_THRESHOLD");
+  if (qat_compress_threshold != nullptr) {
+    options_.qat_compress_threshold = atoi(qat_compress_threshold);
+    // std::cout << "set qat threshold to " << options_.qat_compress_threshold << std::endl;
+  }
+  default_batch_write_options_ = ipc_write_options;
+  ARROW_ASSIGN_OR_RAISE(
+      default_batch_write_options_.codec,
+      arrow::util::Codec::Create(arrow::Compression::LZ4_FRAME));
 
   // Allocate first buffer for split reducer
   ARROW_ASSIGN_OR_RAISE(
@@ -688,11 +699,17 @@ arrow::Status Splitter::CacheRecordBatchPayload(
         total_compress_time_,
         arrow::ipc::GetRecordBatchPayload(
             *batch, tiny_bach_write_options_, payload.get()));
+  } else if (batch->num_rows() <= options_.qat_compress_threshold) {
+    TIME_NANO_OR_RAISE(
+        total_compress_time_,
+        arrow::ipc::GetRecordBatchPayload(
+            *batch, default_batch_write_options_, payload.get()));
   } else {
     TIME_NANO_OR_RAISE(
         total_compress_time_,
         arrow::ipc::GetRecordBatchPayload(
             *batch, options_.ipc_write_options, payload.get()));
+    std::cout << "QAT compress num rows: " << batch->num_rows() << std::endl;
   }
 #else
   // for test reason

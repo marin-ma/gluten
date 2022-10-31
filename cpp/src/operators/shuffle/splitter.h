@@ -345,6 +345,8 @@ class Splitter {
 
   // write options for tiny batches
   arrow::ipc::IpcWriteOptions tiny_bach_write_options_;
+  // write options for compression fallback
+  arrow::ipc::IpcWriteOptions default_batch_write_options_;
 
   std::atomic_int64_t total_bytes_written_{0};
   std::atomic_int64_t total_bytes_spilled_{0};
