@@ -249,6 +249,8 @@ class BenchmarkShuffleSplit {
     options.prefer_spill = true;
     options.write_schema = false;
     options.memory_pool = pool;
+    options.async_compress = state.range(2);
+    options.compression_thread_pool_size = state.range(3);
 
     std::shared_ptr<Splitter> splitter;
     int64_t elapse_read = 0;
@@ -347,6 +349,11 @@ class BenchmarkShuffleSplit {
 
     state.counters["split_time"] = benchmark::Counter(
         split_time,
+        benchmark::Counter::kAvgThreads,
+        benchmark::Counter::OneK::kIs1000);
+
+    state.counters["sync_wait_time"] = benchmark::Counter(
+        splitter->TotalSyncWaitTime(),
         benchmark::Counter::kAvgThreads,
         benchmark::Counter::OneK::kIs1000);
 
@@ -545,6 +552,8 @@ int main(int argc, char** argv) {
   uint32_t partitions = 192;
   uint32_t threads = 1;
   std::string datafile;
+  bool async_compress = false;
+  uint32_t compression_thread_pool_size = 1;
   auto compression_codec = arrow::Compression::LZ4_FRAME;
 
   for (int i = 0; i < argc; i++) {
@@ -556,6 +565,10 @@ int main(int argc, char** argv) {
       threads = atol(argv[i + 1]);
     } else if (strcmp(argv[i], "--file") == 0) {
       datafile = argv[i + 1];
+    } else if (strcmp(argv[i], "--async") == 0) {
+      async_compress = true;
+    } else if (strcmp(argv[i], "--pool-size") == 0) {
+      compression_thread_pool_size = atol(argv[i + 1]);
     } else if (strcmp(argv[i], "--qat") == 0) {
       compression_codec = arrow::Compression::GZIP;
     }
@@ -584,10 +597,11 @@ int main(int argc, char** argv) {
 
   benchmark::RegisterBenchmark("BenchmarkShuffleSplit::IterateScan", bck)
       ->Iterations(iterations)
-      ->Args({
-          partitions,
-          compression_codec,
-      })
+      ->Args(
+          {partitions,
+           compression_codec,
+           async_compress,
+           compression_thread_pool_size})
       ->Threads(threads)
       ->ReportAggregatesOnly(false)
       ->MeasureProcessCPUTime()

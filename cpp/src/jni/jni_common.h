@@ -528,10 +528,12 @@ class SparkAllocationListener : public gluten::memory::AllocationListener {
 
   void UpdateReservation(int64_t diff) {
     JNIEnv* env;
-    if (vm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION) != JNI_OK) {
-      throw gluten::GlutenException(
-          "JNIEnv was not attached to current thread");
-    }
+    AttachCurrentThreadAsDaemonOrThrow(vm_, &env);
+    //     if (vm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION) !=
+    //     JNI_OK) {
+    //       throw gluten::GlutenException(
+    //           "JNIEnv was not attached to current thread");
+    //     }
     int64_t granted = Reserve(diff);
     if (granted == 0) {
       return;

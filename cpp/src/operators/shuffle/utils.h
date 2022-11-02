@@ -82,9 +82,13 @@ static arrow::Result<std::vector<std::string>> GetConfiguredLocalDirs() {
     }
     return res;
   } else {
+    static const auto prefix_for_test = "columnar-shuffle-";
+    std::stringstream ss;
+    ss << prefix_for_test << std::this_thread::get_id();
     ARROW_ASSIGN_OR_RAISE(
-        auto arrow_tmp_dir,
-        arrow::internal::TemporaryDir::Make("columnar-shuffle-"));
+        auto arrow_tmp_dir, arrow::internal::TemporaryDir::Make(ss.str()));
+    std::cout << "Created temp dir for shuffle write: "
+              << arrow_tmp_dir->path().ToString() << std::endl;
     return std::vector<std::string>{arrow_tmp_dir->path().ToString()};
   }
 }
