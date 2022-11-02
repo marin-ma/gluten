@@ -85,7 +85,7 @@ class MyMemoryPool final : public arrow::MemoryPool {
   arrow::internal::MemoryPoolStats stats_;
 };
 
-class VeloxSplitterTest : public ::testing::Test {
+class VeloxSplitterTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() {
     const std::string tmp_dir_prefix = "columnar-shuffle-test";
@@ -227,7 +227,7 @@ arrow::Status SplitRecordBatch(VeloxSplitter& splitter, const arrow::RecordBatch
   return splitter.Split(cb.get());
 }
 
-TEST_F(VeloxSplitterTest, TestHashSplitter) {
+TEST_P(VeloxSplitterTest, TestHashSplitter) {
   uint32_t num_partitions = 2;
   split_options_.buffer_size = 4;
 
@@ -262,7 +262,8 @@ TEST_F(VeloxSplitterTest, TestHashSplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestSingleSplitter) {
+TEST_P(VeloxSplitterTest, TestSingleSplitter) {
+  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 10;
 
   ARROW_ASSIGN_OR_THROW(splitter_, VeloxSplitter::Make("single", 1, split_options_))
@@ -305,8 +306,9 @@ TEST_F(VeloxSplitterTest, TestSingleSplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinSplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinSplitter) {
   int32_t num_partitions = 2;
+  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
   ARROW_ASSIGN_OR_THROW(splitter_, VeloxSplitter::Make("rr", num_partitions, split_options_));
 
@@ -369,7 +371,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinSplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestSplitterMemoryLeak) {
+TEST_P(VeloxSplitterTest, TestSplitterMemoryLeak) {
   std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(17 * 1024 * 1024);
 
   int32_t num_partitions = 2;
@@ -390,7 +392,7 @@ TEST_F(VeloxSplitterTest, TestSplitterMemoryLeak) {
   ASSERT_TRUE(pool->bytes_allocated() == 0);
 }
 
-TEST_F(VeloxSplitterTest, TestFallbackRangeSplitter) {
+TEST_P(VeloxSplitterTest, TestFallbackRangeSplitter) {
   int32_t num_partitions = 2;
   split_options_.buffer_size = 4;
 
@@ -468,7 +470,7 @@ TEST_F(VeloxSplitterTest, TestFallbackRangeSplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestSpillFailWithOutOfMemory) {
+TEST_P(VeloxSplitterTest, TestSpillFailWithOutOfMemory) {
   auto pool = std::make_shared<MyMemoryPool>(0);
 
   int32_t num_partitions = 2;
@@ -483,7 +485,7 @@ TEST_F(VeloxSplitterTest, TestSpillFailWithOutOfMemory) {
   ASSERT_NOT_OK(splitter_->Stop());
 }
 
-TEST_F(VeloxSplitterTest, TestSpillLargestPartition) {
+TEST_P(VeloxSplitterTest, TestSpillLargestPartition) {
   std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(9 * 1024 * 1024);
   //  pool = std::make_shared<arrow::LoggingMemoryPool>(pool.get());
 
@@ -501,7 +503,7 @@ TEST_F(VeloxSplitterTest, TestSpillLargestPartition) {
   ASSERT_NOT_OK(splitter_->Stop());
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinListArraySplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinListArraySplitter) {
   auto f_arr_str = arrow::field("f_arr", arrow::list(arrow::utf8()));
   auto f_arr_bool = arrow::field("f_bool", arrow::list(arrow::boolean()));
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::int32()));
@@ -576,7 +578,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinListArraySplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinNestListArraySplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinNestListArraySplitter) {
   auto f_arr_str = arrow::field("f_str", arrow::list(arrow::list(arrow::utf8())));
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
 
@@ -646,7 +648,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinNestListArraySplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinNestLargeListArraySplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinNestLargeListArraySplitter) {
   auto f_arr_str = arrow::field("f_str", arrow::list(arrow::list(arrow::utf8())));
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
 
@@ -716,7 +718,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinNestLargeListArraySplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinListStructArraySplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinListStructArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_list_struct = arrow::field(
       "f_list_struct",
@@ -788,7 +790,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinListStructArraySplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinListMapArraySplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinListMapArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_list_map = arrow::field("f_list_map", arrow::list(arrow::map(arrow::utf8(), arrow::utf8())));
 
@@ -858,7 +860,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinListMapArraySplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinStructArraySplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinStructArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_struct_list = arrow::field(
       "f_struct_list",
@@ -931,7 +933,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinStructArraySplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinMapArraySplitter) {
+TEST_P(VeloxSplitterTest, TestRoundRobinMapArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_map = arrow::field("f_map", arrow::map(arrow::utf8(), arrow::utf8()));
 
@@ -1001,7 +1003,7 @@ TEST_F(VeloxSplitterTest, TestRoundRobinMapArraySplitter) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestHashListArraySplitterWithMorePartitions) {
+TEST_P(VeloxSplitterTest, TestHashListArraySplitterWithMorePartitions) {
   int32_t num_partitions = 5;
   split_options_.buffer_size = 4;
 
@@ -1042,7 +1044,7 @@ TEST_F(VeloxSplitterTest, TestHashListArraySplitterWithMorePartitions) {
   }
 }
 
-TEST_F(VeloxSplitterTest, TestRoundRobinListArraySplitterwithCompression) {
+TEST_P(VeloxSplitterTest, TestRoundRobinListArraySplitterwithCompression) {
   auto f_arr_str = arrow::field("f_arr", arrow::list(arrow::utf8()));
   auto f_arr_bool = arrow::field("f_bool", arrow::list(arrow::boolean()));
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::int32()));
@@ -1117,5 +1119,10 @@ TEST_F(VeloxSplitterTest, TestRoundRobinListArraySplitterwithCompression) {
     ASSERT_TRUE(rb->Equals(*expected[i]));
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    TestSplitterWithOrWithoutUseThread,
+    VeloxSplitterTest,
+    ::testing::Values(true, false));
 
 } // namespace gluten
