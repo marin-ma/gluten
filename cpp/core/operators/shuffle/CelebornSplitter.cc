@@ -337,7 +337,7 @@ arrow::Status CelebornSinglePartSplitter::Split(ColumnarBatch* batch) {
     schema_ = rb->schema();
     RETURN_NOT_OK(InitColumnType());
   }
-  RETURN_NOT_OK(CacheRecordBatch(0, *rb));
+  RETURN_NOT_OK(CacheRecordBatchPayload(0, *rb));
   if (partition_cached_recordbatch_size_[0] > options_.push_buffer_max_size) {
     RETURN_NOT_OK(PushPartition(0));
   }

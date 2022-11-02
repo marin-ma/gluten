@@ -52,6 +52,10 @@ class SplitterBase {
     return total_compress_time_;
   }
 
+  int64_t TotalSyncWaitTime() const {
+    return total_sync_wait_time_;
+  }
+
   const std::vector<int64_t>& PartitionLengths() const {
     return partition_lengths_;
   }
@@ -69,11 +73,15 @@ class SplitterBase {
   // options
   SplitOptions options_;
 
-  int64_t total_bytes_written_ = 0;
+  std::atomic_int64_t total_bytes_written_{0};
+  std::atomic_int64_t total_write_time_{0};
+  std::atomic_int64_t total_compress_time_{0};
+
   int64_t total_bytes_evicted_ = 0;
-  int64_t total_write_time_ = 0;
   int64_t total_evict_time_ = 0;
-  int64_t total_compress_time_ = 0;
+
+  int64_t total_sync_wait_time_ = 0;
+
   int64_t peak_memory_allocated_ = 0;
 
   std::vector<int64_t> partition_lengths_;

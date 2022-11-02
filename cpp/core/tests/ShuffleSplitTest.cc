@@ -105,7 +105,7 @@ class MyMemoryPool final : public arrow::MemoryPool {
   arrow::internal::MemoryPoolStats stats_;
 };
 
-class SplitterTest : public ::testing::Test {
+class SplitterTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
     auto hash_partition_key = field("hash_partition_key", arrow::int32());
@@ -159,6 +159,8 @@ class SplitterTest : public ::testing::Test {
     MakeInputBatch(hash_input_data_1, hash_schema_, &hash_input_batch_1_);
     MakeInputBatch(hash_input_data_2, hash_schema_, &hash_input_batch_2_);
     split_options_ = SplitOptions::Defaults();
+    split_options_.async_compress = GetParam();
+    split_options_.compression_thread_pool_size = 2;
   }
 
   void TearDown() override {
@@ -257,7 +259,7 @@ std::shared_ptr<ColumnarBatch> RecordBatchToColumnarBatch(std::shared_ptr<arrow:
   return std::make_shared<ArrowCStructColumnarBatch>(std::move(cSchema), std::move(cArray));
 }
 
-TEST_F(SplitterTest, TestSingleSplitter) {
+TEST_P(SplitterTest, TestSingleSplitter) {
   split_options_.buffer_size = 10;
 
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("single", 1, split_options_))
@@ -301,7 +303,7 @@ TEST_F(SplitterTest, TestSingleSplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinSplitter) {
+TEST_P(SplitterTest, TestRoundRobinSplitter) {
   int32_t num_partitions = 2;
   split_options_.buffer_size = 4;
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("rr", num_partitions, split_options_));
@@ -365,7 +367,7 @@ TEST_F(SplitterTest, TestRoundRobinSplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestSplitterMemoryLeak) {
+TEST_P(SplitterTest, TestSplitterMemoryLeak) {
   std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(17 * 1024 * 1024);
 
   int32_t num_partitions = 2;
@@ -386,7 +388,7 @@ TEST_F(SplitterTest, TestSplitterMemoryLeak) {
   ASSERT_TRUE(pool->bytes_allocated() == 0);
 }
 
-TEST_F(SplitterTest, TestHashSplitter) {
+TEST_P(SplitterTest, TestHashSplitter) {
   int32_t num_partitions = 2;
   split_options_.buffer_size = 4;
 
@@ -421,7 +423,7 @@ TEST_F(SplitterTest, TestHashSplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestFallbackRangeSplitter) {
+TEST_P(SplitterTest, TestFallbackRangeSplitter) {
   int32_t num_partitions = 2;
   split_options_.buffer_size = 4;
 
@@ -499,7 +501,7 @@ TEST_F(SplitterTest, TestFallbackRangeSplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestSpillFailWithOutOfMemory) {
+TEST_P(SplitterTest, TestSpillFailWithOutOfMemory) {
   auto pool = std::make_shared<MyMemoryPool>(0);
 
   int32_t num_partitions = 2;
@@ -513,7 +515,7 @@ TEST_F(SplitterTest, TestSpillFailWithOutOfMemory) {
   ASSERT_NOT_OK(splitter_->Stop());
 }
 
-TEST_F(SplitterTest, TestSpillLargestPartition) {
+TEST_P(SplitterTest, TestSpillLargestPartition) {
   std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(9 * 1024 * 1024);
   //  pool = std::make_shared<arrow::LoggingMemoryPool>(pool.get());
 
@@ -531,7 +533,7 @@ TEST_F(SplitterTest, TestSpillLargestPartition) {
   ASSERT_NOT_OK(splitter_->Stop());
 }
 
-TEST_F(SplitterTest, TestRoundRobinListArraySplitter) {
+TEST_P(SplitterTest, TestRoundRobinListArraySplitter) {
   auto f_arr_str = arrow::field("f_arr", arrow::list(arrow::utf8()));
   auto f_arr_bool = arrow::field("f_bool", arrow::list(arrow::boolean()));
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::int32()));
@@ -608,7 +610,7 @@ TEST_F(SplitterTest, TestRoundRobinListArraySplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinNestListArraySplitter) {
+TEST_P(SplitterTest, TestRoundRobinNestListArraySplitter) {
   auto f_arr_str = arrow::field("f_str", arrow::list(arrow::list(arrow::utf8())));
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
 
@@ -678,7 +680,7 @@ TEST_F(SplitterTest, TestRoundRobinNestListArraySplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinNestLargeListArraySplitter) {
+TEST_P(SplitterTest, TestRoundRobinNestLargeListArraySplitter) {
   auto f_arr_str = arrow::field("f_str", arrow::large_list(arrow::list(arrow::utf8())));
   auto f_arr_int32 = arrow::field("f_int32", arrow::large_list(arrow::list(arrow::int32())));
 
@@ -748,7 +750,7 @@ TEST_F(SplitterTest, TestRoundRobinNestLargeListArraySplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinListStructArraySplitter) {
+TEST_P(SplitterTest, TestRoundRobinListStructArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_list_struct = arrow::field(
       "f_list_struct",
@@ -820,7 +822,7 @@ TEST_F(SplitterTest, TestRoundRobinListStructArraySplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinListMapArraySplitter) {
+TEST_P(SplitterTest, TestRoundRobinListMapArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_list_map = arrow::field("f_list_map", arrow::list(arrow::map(arrow::utf8(), arrow::utf8())));
 
@@ -890,7 +892,7 @@ TEST_F(SplitterTest, TestRoundRobinListMapArraySplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinStructArraySplitter) {
+TEST_P(SplitterTest, TestRoundRobinStructArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_struct_list = arrow::field(
       "f_struct_list",
@@ -962,7 +964,7 @@ TEST_F(SplitterTest, TestRoundRobinStructArraySplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinMapArraySplitter) {
+TEST_P(SplitterTest, TestRoundRobinMapArraySplitter) {
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::list(arrow::int32())));
   auto f_arr_map = arrow::field("f_map", arrow::map(arrow::utf8(), arrow::utf8()));
 
@@ -1032,7 +1034,7 @@ TEST_F(SplitterTest, TestRoundRobinMapArraySplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestHashListArraySplitterWithMorePartitions) {
+TEST_P(SplitterTest, TestHashListArraySplitterWithMorePartitions) {
   int32_t num_partitions = 5;
   split_options_.buffer_size = 4;
 
@@ -1073,7 +1075,7 @@ TEST_F(SplitterTest, TestHashListArraySplitterWithMorePartitions) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinListArraySplitterwithCompression) {
+TEST_P(SplitterTest, TestRoundRobinListArraySplitterwithCompression) {
   auto f_arr_str = arrow::field("f_arr", arrow::list(arrow::utf8()));
   auto f_arr_bool = arrow::field("f_bool", arrow::list(arrow::boolean()));
   auto f_arr_int32 = arrow::field("f_int32", arrow::list(arrow::int32()));
@@ -1150,6 +1152,11 @@ TEST_F(SplitterTest, TestRoundRobinListArraySplitterwithCompression) {
     ASSERT_TRUE(rb->Equals(*expected[i]));
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    TestSplitterWithOrWithoutUseThread,
+    SplitterTest,
+    ::testing::Values(true, false));
 
 } // namespace shuffle
 } // namespace gluten

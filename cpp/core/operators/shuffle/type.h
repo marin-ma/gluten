@@ -33,6 +33,7 @@ namespace gluten {
 static constexpr int32_t kDefaultSplitterBufferSize = 4096;
 static constexpr int32_t kDefaultNumSubDirs = 64;
 static constexpr int32_t kDefaultBatchCompressThreshold = 256;
+static constexpr int32_t kDefaultCompressionThreadPoolSize = 1;
 
 // This 0xFFFFFFFF value is the first 4 bytes of a valid IPC message
 static constexpr int32_t kIpcContinuationToken = -1;
@@ -51,12 +52,17 @@ struct SplitOptions {
   int32_t push_buffer_max_size = kDefaultSplitterBufferSize;
   int32_t num_sub_dirs = kDefaultNumSubDirs;
   int32_t batch_compress_threshold = kDefaultBatchCompressThreshold;
+  int32_t compression_thread_pool_size = kDefaultCompressionThreadPoolSize;
+
   arrow::Compression::type compression_type = arrow::Compression::UNCOMPRESSED;
 
   bool prefer_spill = true;
   bool write_schema = true;
   bool buffered_write = false;
+
   bool is_celeborn = false;
+
+  bool async_compress = false;
 
   std::string data_file;
 
