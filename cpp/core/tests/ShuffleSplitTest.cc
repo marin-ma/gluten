@@ -105,7 +105,7 @@ class MyMemoryPool final : public arrow::MemoryPool {
   arrow::internal::MemoryPoolStats stats_;
 };
 
-class SplitterTest : public ::testing::Test {
+class SplitterTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
     auto hash_partition_key = field("hash_partition_key", arrow::int32());
@@ -257,7 +257,8 @@ std::shared_ptr<ColumnarBatch> RecordBatchToColumnarBatch(std::shared_ptr<arrow:
   return std::make_shared<ArrowCStructColumnarBatch>(std::move(cSchema), std::move(cArray));
 }
 
-TEST_F(SplitterTest, TestSingleSplitter) {
+TEST_P(SplitterTest, TestSingleSplitter) {
+  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 10;
 
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("single", 1, split_options_))
@@ -301,8 +302,9 @@ TEST_F(SplitterTest, TestSingleSplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestRoundRobinSplitter) {
+TEST_P(SplitterTest, TestRoundRobinSplitter) {
   int32_t num_partitions = 2;
+  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("rr", num_partitions, split_options_));
 
@@ -369,6 +371,7 @@ TEST_F(SplitterTest, TestSplitterMemoryLeak) {
   std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(17 * 1024 * 1024);
 
   int32_t num_partitions = 2;
+  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
   split_options_.memory_pool = pool;
   split_options_.write_schema = false;
@@ -386,8 +389,9 @@ TEST_F(SplitterTest, TestSplitterMemoryLeak) {
   ASSERT_TRUE(pool->bytes_allocated() == 0);
 }
 
-TEST_F(SplitterTest, TestHashSplitter) {
+TEST_P(SplitterTest, TestHashSplitter) {
   int32_t num_partitions = 2;
+  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
 
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("hash", num_partitions, split_options_))
@@ -421,8 +425,9 @@ TEST_F(SplitterTest, TestHashSplitter) {
   }
 }
 
-TEST_F(SplitterTest, TestFallbackRangeSplitter) {
+TEST_P(SplitterTest, TestFallbackRangeSplitter) {
   int32_t num_partitions = 2;
+  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
 
   std::shared_ptr<arrow::Array> pid_arr_0;
@@ -1150,6 +1155,11 @@ TEST_F(SplitterTest, TestRoundRobinListArraySplitterwithCompression) {
     ASSERT_TRUE(rb->Equals(*expected[i]));
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    TestSplitterWithOrWithoutUseThread,
+    SplitterTest,
+    ::testing::Values(true, false));
 
 } // namespace shuffle
 } // namespace gluten
