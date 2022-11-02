@@ -29,6 +29,9 @@
 #include "substrait/plan.pb.h"
 #include "utils/exception.h"
 #include "utils/metrics.h"
+
+#include <iostream>
+
 namespace gluten {
 using ArrowArrayIterator = arrow::Iterator<std::shared_ptr<ArrowArray>>;
 using GlutenIterator =
@@ -58,18 +61,18 @@ class ExecBackendBase : public std::enable_shared_from_this<ExecBackendBase> {
   /// Parse and cache the plan.
   /// Return true if parsed successfully.
   bool ParsePlan(const uint8_t* data, int32_t size) {
-#ifdef GLUTEN_PRINT_DEBUG
     auto buf = std::make_shared<arrow::Buffer>(data, size);
     auto maybe_plan_json = SubstraitToJSON("Plan", *buf);
     if (maybe_plan_json.status().ok()) {
+#ifdef GLUTEN_PRINT_DEBUG
       std::cout << std::string(50, '#')
                 << " received substrait::Plan:" << std::endl;
       std::cout << maybe_plan_json.ValueOrDie() << std::endl;
+#endif
     } else {
       std::cout << "Error parsing substrait plan to json: "
                 << maybe_plan_json.status().ToString() << std::endl;
     }
-#endif
     return ParseProtobuf(data, size, &plan_);
   }
 

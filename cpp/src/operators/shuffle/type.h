@@ -66,6 +66,9 @@ struct SplitOptions {
   arrow::ipc::IpcWriteOptions ipc_write_options =
       arrow::ipc::IpcWriteOptions::Defaults();
 
+  // For test purpose.
+  bool hash_split_use_gandiva_expr = false;
+
   static SplitOptions Defaults();
 };
 
