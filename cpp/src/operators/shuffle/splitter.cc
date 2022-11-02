@@ -86,8 +86,7 @@ class Splitter::PartitionWriter {
 #ifndef SKIPWRITE
     RETURN_NOT_OK(EnsureOpened());
 #endif
-    RETURN_NOT_OK(
-        WriteRecordBatchPayload(spilled_file_os_.get(), partition_id_));
+    RETURN_NOT_OK(WriteRecordBatchPayload(spilled_file_os_.get()));
     ClearCache();
     return arrow::Status::OK();
   }
@@ -109,7 +108,7 @@ class Splitter::PartitionWriter {
       }
     }
 
-    RETURN_NOT_OK(WriteRecordBatchPayload(data_file_os.get(), partition_id_));
+    RETURN_NOT_OK(WriteRecordBatchPayload(data_file_os.get()));
     RETURN_NOT_OK(WriteEOS(data_file_os.get()));
     ClearCache();
 
@@ -164,9 +163,7 @@ class Splitter::PartitionWriter {
     return arrow::Status::OK();
   }
 
-  arrow::Status WriteRecordBatchPayload(
-      arrow::io::OutputStream* os,
-      int32_t partition_id) {
+  arrow::Status WriteRecordBatchPayload(arrow::io::OutputStream* os) {
     int32_t metadata_length = 0; // unused
 #ifndef SKIPWRITE
     for (auto& payload :
@@ -216,6 +213,20 @@ arrow::Result<std::shared_ptr<Splitter>> Splitter::Make(
   if (short_name == "hash") {
     if (expr_data == nullptr || expr_size == 0) {
       return arrow::Status::Invalid("Invalid expression data or size.");
+    }
+    if (options.hash_split_use_gandiva_expr) {
+      auto expr_vector_ptr = reinterpret_cast<gandiva::ExpressionVector*>(
+          const_cast<uint8_t*>(expr_data));
+      gandiva::ExpressionVector expr_vector;
+      expr_vector.reserve(expr_size);
+      for (auto i = 0; i < expr_size; ++i) {
+        expr_vector.push_back((*expr_vector_ptr)[i]);
+      }
+      return HashSplitter::Create(
+          num_partitions,
+          std::move(schema),
+          std::move(expr_vector),
+          std::move(options));
     }
     substrait::Rel subRel;
     ParseProtobuf(expr_data, expr_size, &subRel);
@@ -1027,6 +1038,7 @@ arrow::Status Splitter::DoSplit(const arrow::RecordBatch& rb) {
 
   return arrow::Status::OK();
 }
+
 template <typename T>
 arrow::Status Splitter::SplitFixedType(
     const uint8_t* src_addr,
@@ -1542,6 +1554,19 @@ arrow::Result<std::shared_ptr<HashSplitter>> HashSplitter::Create(
   return res;
 }
 
+arrow::Result<std::shared_ptr<HashSplitter>> HashSplitter::Create(
+    int32_t num_partitions,
+    std::shared_ptr<arrow::Schema> schema,
+    std::vector<std::shared_ptr<gandiva::Expression>> expr_vector,
+    SplitOptions options) {
+  std::shared_ptr<HashSplitter> res(
+      new HashSplitter(num_partitions, std::move(schema), std::move(options)));
+  res->exprVector_ = std::move(expr_vector);
+  RETURN_NOT_OK(res->Init());
+  RETURN_NOT_OK(res->CreateProjector());
+  return res;
+}
+
 arrow::Status HashSplitter::CreateGandivaExpr(const substrait::Rel& subRel) {
   // Parse the ProjectRel to get hash expression.
   // Currently, only filed is supported.
@@ -1651,8 +1676,8 @@ arrow::Status HashSplitter::ComputeAndCountPartitionId(
         "lea (%[num_partitions],%[pid],1),%[tmp]\n"
         "test %[pid],%[pid]\n"
         "cmovs %[tmp],%[pid]\n"
-        : [ pid ] "+r"(pid)
-        : [ num_partitions ] "r"(num_partitions_), [ tmp ] "r"(0));
+        : [pid] "+r"(pid)
+        : [num_partitions] "r"(num_partitions_), [tmp] "r"(0));
     partition_id_[i] = pid;
     partition_id_cnt_[pid]++;
   }

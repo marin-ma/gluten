@@ -366,6 +366,12 @@ class HashSplitter : public Splitter {
       const substrait::Rel& subRel,
       SplitOptions options);
 
+  static arrow::Result<std::shared_ptr<HashSplitter>> Create(
+      int32_t num_partitions,
+      std::shared_ptr<arrow::Schema> schema,
+      std::vector<std::shared_ptr<gandiva::Expression>> expr_vector,
+      SplitOptions options);
+
  private:
   HashSplitter(
       int32_t num_partitions,
