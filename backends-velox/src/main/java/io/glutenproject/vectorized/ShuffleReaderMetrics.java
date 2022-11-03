@@ -17,19 +17,15 @@
 
 package io.glutenproject.vectorized;
 
-public class ShuffleReaderJniWrapper {
+public class ShuffleReaderMetrics {
+    public long decompressTime;
+    public long memcpyTime;
 
-  private ShuffleReaderJniWrapper() {
-  }
+    public void setMemcpyTime(long memcpyTime) {
+        this.memcpyTime = memcpyTime;
+    }
 
-  static {
-    JniWorkspace.getDefault().libLoader().loadEssentials();
-  }
-
-  public static native long make(JniByteInputStream jniIn, long cSchema, ShuffleReaderMetrics metrics);
-
-  public static native long next(long handle);
-
-  public static native void close(long handle);
-
+    public void setDecompressTime(long decompressTime) {
+        this.decompressTime = decompressTime;
+    }
 }

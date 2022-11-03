@@ -74,6 +74,10 @@ static jmethodID serialized_arrow_array_iterator_next;
 static jclass native_columnar_to_row_info_class;
 static jmethodID native_columnar_to_row_info_constructor;
 
+static jclass shuffle_reader_metrics_class;
+static jmethodID shuffle_reader_metrics_set_decompress_time;
+static jmethodID shuffle_reader_metrics_set_memcpy_time;
+
 jlong default_memory_allocator_id = -1L;
 
 using arrow::jni::ConcurrentMap;
@@ -110,13 +114,14 @@ std::shared_ptr<GlutenResultIterator> GetArrayIterator(JNIEnv* env, jlong id) {
 
 class JavaInputStreamAdaptor : public arrow::io::InputStream {
  public:
-  JavaInputStreamAdaptor(JNIEnv* env, jobject jni_in) {
+  JavaInputStreamAdaptor(JNIEnv* env, jobject jni_in, jobject metrics) {
     // IMPORTANT: DO NOT USE LOCAL REF IN DIFFERENT THREAD
     if (env->GetJavaVM(&vm_) != JNI_OK) {
       std::string error_message = "Unable to get JavaVM instance";
       gluten::JniThrow(error_message);
     }
     jni_in_ = env->NewGlobalRef(jni_in);
+    metrics_ = metrics;
   }
 
   ~JavaInputStreamAdaptor() override {
@@ -132,7 +137,12 @@ class JavaInputStreamAdaptor : public arrow::io::InputStream {
     AttachCurrentThreadAsDaemonOrThrow(vm_, &env);
     env->CallVoidMethod(jni_in_, jni_byte_input_stream_close);
     CheckException(env);
+    std::cout << "return memcpy_time " << memcpy_time_ << std::endl;
+    env->CallVoidMethod(
+        metrics_, shuffle_reader_metrics_set_memcpy_time, memcpy_time_);
+    CheckException(env);
     env->DeleteGlobalRef(jni_in_);
+    env->DeleteGlobalRef(metrics_);
     vm_->DetachCurrentThread();
     closed_ = true;
     return Status::OK();
@@ -159,21 +169,35 @@ class JavaInputStreamAdaptor : public arrow::io::InputStream {
   }
 
   arrow::Result<std::shared_ptr<arrow::Buffer>> Read(int64_t nbytes) override {
+    auto start = std::chrono::steady_clock::now();
     GLUTEN_ASSIGN_OR_THROW(
         auto buffer,
         arrow::AllocateResizableBuffer(
             nbytes, gluten::memory::GetDefaultWrappedArrowMemoryPool().get()))
+    auto end = std::chrono::steady_clock::now();
+    memcpy_time_ +=
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+            .count();
+
     GLUTEN_ASSIGN_OR_THROW(
         int64_t bytes_read, Read(nbytes, buffer->mutable_data()));
+
+    start = std::chrono::steady_clock::now();
     GLUTEN_THROW_NOT_OK(buffer->Resize(bytes_read, false));
     buffer->ZeroPadding();
+    end = std::chrono::steady_clock::now();
+    memcpy_time_ +=
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+            .count();
     return std::move(buffer);
   }
 
  private:
   JavaVM* vm_;
   jobject jni_in_;
+  jobject metrics_;
   bool closed_ = false;
+  int64_t memcpy_time_ = 0;
 };
 
 class JavaArrowArrayIterator {
@@ -321,6 +345,13 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
   serialized_arrow_array_iterator_next = GetMethodIDOrError(
       env, serialized_arrow_array_iterator_class, "next", "()J");
 
+  shuffle_reader_metrics_class = CreateGlobalClassReferenceOrError(
+      env, "Lio/glutenproject/vectorized/ShuffleReaderMetrics;");
+  shuffle_reader_metrics_set_decompress_time = GetMethodIDOrError(
+      env, shuffle_reader_metrics_class, "setDecompressTime", "(J)V");
+  shuffle_reader_metrics_set_memcpy_time = GetMethodIDOrError(
+      env, shuffle_reader_metrics_class, "setMemcpyTime", "(J)V");
+
   native_columnar_to_row_info_class = CreateGlobalClassReferenceOrError(
       env, "Lio/glutenproject/vectorized/NativeColumnarToRowInfo;");
   native_columnar_to_row_info_constructor = GetMethodIDOrError(
@@ -351,8 +382,8 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
   env->DeleteGlobalRef(split_result_class);
   env->DeleteGlobalRef(serialized_arrow_array_iterator_class);
   env->DeleteGlobalRef(native_columnar_to_row_info_class);
-
   env->DeleteGlobalRef(byte_array_class);
+  env->DeleteGlobalRef(shuffle_reader_metrics_class);
 
   array_iterator_holder_.Clear();
   columnar_to_row_converter_holder_.Clear();
@@ -991,16 +1022,19 @@ Java_io_glutenproject_vectorized_ShuffleReaderJniWrapper_make(
     JNIEnv* env,
     jclass,
     jobject jni_in,
-    jlong c_schema) {
+    jlong c_schema,
+    jobject jmetrics) {
   JNI_METHOD_START
+  jobject metrics = env->NewGlobalRef(jmetrics);
   std::shared_ptr<arrow::io::InputStream> in =
-      std::make_shared<JavaInputStreamAdaptor>(env, jni_in);
+      std::make_shared<JavaInputStreamAdaptor>(env, jni_in, metrics);
   gluten::shuffle::ReaderOptions options =
       gluten::shuffle::ReaderOptions::Defaults();
   options.ipc_read_options.use_threads = false;
   std::shared_ptr<arrow::Schema> schema = gluten::JniGetOrThrow(
       arrow::ImportSchema(reinterpret_cast<struct ArrowSchema*>(c_schema)));
-  auto reader = std::make_shared<gluten::shuffle::Reader>(in, schema, options);
+  auto reader = std::make_shared<gluten::shuffle::Reader>(
+      in, schema, options, (void*)metrics);
   return shuffle_reader_holder_.Insert(reader);
   JNI_METHOD_END(-1L)
 }
@@ -1028,6 +1062,14 @@ Java_io_glutenproject_vectorized_ShuffleReaderJniWrapper_close(
   JNI_METHOD_START
   auto reader = shuffle_reader_holder_.Lookup(handle);
   GLUTEN_THROW_NOT_OK(reader->Close());
+  auto metrics = reinterpret_cast<jobject>(reader->metrics);
+  std::cout << "return decompress time " << reader->GetDecompressTime()
+            << std::endl;
+  env->CallVoidMethod(
+      metrics,
+      shuffle_reader_metrics_set_decompress_time,
+      reader->GetDecompressTime());
+  CheckException(env);
   shuffle_reader_holder_.Erase(handle);
   JNI_METHOD_END()
 }

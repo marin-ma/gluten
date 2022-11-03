@@ -48,6 +48,8 @@ case class ColumnarShuffleExchangeExec(override val outputPartitioning: Partitio
     "spillTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "shuffle spill time"),
     "compressTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_compress"),
     "prepareTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_prepare"),
+    "decompressTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_decompress"),
+    "readMemcpyTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_readmemcpy"),
     "avgReadBatchNumRows" -> SQLMetrics
       .createAverageMetric(sparkContext, "avg read batch num rows"),
     "numInputRows" -> SQLMetrics.createMetric(sparkContext, "number of input rows"),
@@ -115,7 +117,9 @@ case class ColumnarShuffleExchangeExec(override val outputPartitioning: Partitio
       .createColumnarBatchSerializer(schema,
         longMetric("avgReadBatchNumRows"),
         longMetric("numOutputRows"),
-        longMetric("dataSize"))
+        longMetric("dataSize"),
+        longMetric("decompressTime"),
+        longMetric("readMemcpyTime"))
 
   var cachedShuffleRDD: ShuffledColumnarBatchRDD = _
 
@@ -172,6 +176,8 @@ case class ColumnarShuffleExchangeAdaptor(override val outputPartitioning: Parti
     "spillTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "shuffle spill time"),
     "compressTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_compress"),
     "prepareTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_prepare"),
+    "decompressTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_decompress"),
+    "readMemcpyTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "totaltime_readmemcpy"),
     "avgReadBatchNumRows" -> SQLMetrics
       .createAverageMetric(sparkContext, "avg read batch num rows"),
     "numInputRows" -> SQLMetrics.createMetric(sparkContext, "number of input rows"),
@@ -238,7 +244,9 @@ case class ColumnarShuffleExchangeAdaptor(override val outputPartitioning: Parti
     .createColumnarBatchSerializer(schema,
       longMetric("avgReadBatchNumRows"),
       longMetric("numOutputRows"),
-      longMetric("dataSize"))
+      longMetric("dataSize"),
+      longMetric("decompressTime"),
+      longMetric("readMemcpyTime"))
 
   var cachedShuffleRDD: ShuffledColumnarBatchRDD = _
 

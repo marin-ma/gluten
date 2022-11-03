@@ -20,6 +20,7 @@
 #include "arrow/record_batch.h"
 
 #include <utility>
+#include <chrono>
 
 namespace gluten {
 namespace shuffle {
@@ -31,10 +32,12 @@ ReaderOptions ReaderOptions::Defaults() {
 Reader::Reader(
     std::shared_ptr<arrow::io::InputStream> in,
     std::shared_ptr<arrow::Schema> schema,
-    gluten::shuffle::ReaderOptions options)
+    gluten::shuffle::ReaderOptions options,
+    void* metrics)
     : in_(std::move(in)),
       schema_(std::move(schema)),
-      options_(std::move(options)) {
+      options_(std::move(options)),
+      metrics(metrics) {
   GLUTEN_ASSIGN_OR_THROW(first_message_, arrow::ipc::ReadMessage(in_.get()))
   if (first_message_->type() == arrow::ipc::MessageType::SCHEMA) {
     GLUTEN_ASSIGN_OR_THROW(
@@ -56,10 +59,14 @@ Reader::Next() {
   if (message_to_read == nullptr) {
     return nullptr;
   }
+  auto start = std::chrono::steady_clock::now();
   GLUTEN_ASSIGN_OR_THROW(
       arrow_batch,
       arrow::ipc::ReadRecordBatch(
           *message_to_read, schema_, nullptr, options_.ipc_read_options))
+  auto end = std::chrono::steady_clock::now();
+  decompress_time_ += std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+      .count();
   std::shared_ptr<gluten::memory::GlutenColumnarBatch> gluten_batch =
       std::make_shared<gluten::memory::GlutenArrowColumnarBatch>(arrow_batch);
   return gluten_batch;

@@ -210,12 +210,17 @@ class VeloxSparkPlanExecApi extends ISparkPlanExecApi {
    *
    * @return
    */
-  override def createColumnarBatchSerializer(
-    schema: StructType,
+  def createColumnarBatchSerializer(schema: StructType,
     readBatchNumRows: SQLMetric,
     numOutputRows: SQLMetric,
-    dataSize: SQLMetric): Serializer = {
-    new GlutenColumnarBatchSerializer(schema, readBatchNumRows, numOutputRows)
+    dataSize: SQLMetric,
+    decompressTime: SQLMetric,
+    readMemcpyTime: SQLMetric): Serializer = {
+    new GlutenColumnarBatchSerializer(schema,
+      readBatchNumRows,
+      numOutputRows,
+      decompressTime,
+      readMemcpyTime)
   }
 
   /**

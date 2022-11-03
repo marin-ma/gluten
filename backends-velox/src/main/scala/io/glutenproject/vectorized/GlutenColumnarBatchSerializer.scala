@@ -38,18 +38,24 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 
 class GlutenColumnarBatchSerializer(schema: StructType, readBatchNumRows: SQLMetric,
-  numOutputRows: SQLMetric)
+  numOutputRows: SQLMetric, decompressTime: SQLMetric, readMemcpyTime: SQLMetric)
   extends Serializer with Serializable {
 
   /** Creates a new [[SerializerInstance]]. */
   override def newInstance(): SerializerInstance = {
-    new GlutenColumnarBatchSerializerInstance(schema, readBatchNumRows, numOutputRows)
+    new GlutenColumnarBatchSerializerInstance(schema,
+      readBatchNumRows,
+      numOutputRows,
+      decompressTime,
+      readMemcpyTime)
   }
 }
 
 private class GlutenColumnarBatchSerializerInstance(schema: StructType,
   readBatchNumRows: SQLMetric,
-  numOutputRows: SQLMetric)
+  numOutputRows: SQLMetric,
+  decompressTime: SQLMetric,
+  readMemcpyTime: SQLMetric)
   extends SerializerInstance
     with Logging {
 
@@ -60,13 +66,15 @@ private class GlutenColumnarBatchSerializerInstance(schema: StructType,
         .contextInstance()
         .newChildAllocator("GlutenColumnarBatch deserialize", 0, Long.MaxValue)
 
+      private val readerMetrics = new ShuffleReaderMetrics()
+
       private val shuffleReaderHandle = {
         val cSchema = ArrowSchema.allocateNew(ArrowBufferAllocators.contextInstance())
         val arrowSchema =
           SparkSchemaUtils.toArrowSchema(schema, SQLConf.get.sessionLocalTimeZone)
         ArrowAbiUtil.exportSchema(allocator, arrowSchema, cSchema)
         val handle = ShuffleReaderJniWrapper.make(
-          JniByteInputStreams.create(in), cSchema.memoryAddress())
+          JniByteInputStreams.create(in), cSchema.memoryAddress(), readerMetrics)
         cSchema.close()
         handle
       }
@@ -138,6 +146,8 @@ private class GlutenColumnarBatchSerializerInstance(schema: StructType,
           ShuffleReaderJniWrapper.close(shuffleReaderHandle)
           allocator.close()
           isClosed = true
+          readMemcpyTime += readerMetrics.memcpyTime
+          decompressTime += readerMetrics.decompressTime
         }
       }
     }

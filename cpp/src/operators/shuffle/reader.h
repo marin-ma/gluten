@@ -28,10 +28,17 @@ class Reader {
   Reader(
       std::shared_ptr<arrow::io::InputStream> in,
       std::shared_ptr<arrow::Schema> schema,
-      gluten::shuffle::ReaderOptions options);
+      gluten::shuffle::ReaderOptions options,
+      void* metrics);
 
   arrow::Result<std::shared_ptr<gluten::memory::GlutenColumnarBatch>> Next();
   arrow::Status Close();
+
+  int64_t GetDecompressTime() {
+    return decompress_time_;
+  }
+
+  void* metrics;
 
  private:
   std::shared_ptr<arrow::io::InputStream> in_;
@@ -39,6 +46,7 @@ class Reader {
   std::shared_ptr<arrow::Schema> schema_;
   std::unique_ptr<arrow::ipc::Message> first_message_;
   bool first_message_consumed_ = false;
+  int64_t decompress_time_= 0;
 };
 
 } // namespace shuffle

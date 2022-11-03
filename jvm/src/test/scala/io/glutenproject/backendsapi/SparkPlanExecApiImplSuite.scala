@@ -152,11 +152,12 @@ class SparkPlanExecApiImplSuite extends ISparkPlanExecApi {
    *
    * @return
    */
-  override def createColumnarBatchSerializer(schema: StructType,
-                                             readBatchNumRows: SQLMetric,
-                                             numOutputRows: SQLMetric,
-                                             dataSize: SQLMetric): Serializer = null
-
+  def createColumnarBatchSerializer(schema: StructType,
+    readBatchNumRows: SQLMetric,
+    numOutputRows: SQLMetric,
+    dataSize: SQLMetric,
+    decompressTime: SQLMetric,
+    readMemcpyTime: SQLMetric): Serializer = null
 
   /**
    * Generate extended DataSourceV2 Strategies.
