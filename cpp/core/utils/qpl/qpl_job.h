@@ -17,20 +17,34 @@
 
 #pragma once
 
-#include <arrow/util/compression.h>
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <random>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <qpl/qpl.h>
+#include "utils/exception.h"
 
 namespace gluten {
 namespace qpl {
 
-static const std::vector<std::string> qpl_supported_codec = {"gzip"};
+class IAAJob;
 
-bool SupportsCodec(const std::string& codec);
+class IAADeflateCodec {
+ public:
+  explicit IAADeflateCodec(qpl_compression_levels compressionLevel) : compressionLevel_(compressionLevel){};
+  uint32_t doCompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t dest_size);
+  uint32_t doDecompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t uncompressed_size);
 
-void EnsureQplCodecRegistered(const std::string& codec);
+ private:
+  qpl_compression_levels compressionLevel_ = qpl_default_level;
 
-std::unique_ptr<arrow::util::Codec> MakeQplGZipCodec(int compressionLevel);
-
-std::unique_ptr<arrow::util::Codec> MakeDefaultQplGZipCodec();
+  static thread_local IAAJob iaaJob_;
+  static constexpr auto paths = {qpl_path_hardware, qpl_path_software};
+};
 
 } // namespace qpl
 } // namespace gluten
