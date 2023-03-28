@@ -32,12 +32,20 @@ class QplGzipCodec final : public arrow::util::Codec {
 
   arrow::Result<int64_t>
   Compress(int64_t input_len, const uint8_t* input, int64_t output_buffer_len, uint8_t* output_buffer) override {
-    return dedicated_->doCompressData(input, input_len, output_buffer, output_buffer_len);
+    auto size = dedicated_->doCompressData(input, input_len, output_buffer, output_buffer_len);
+    if (size == -1) {
+      return arrow::Status::Invalid("Compress error.");
+    }
+    return size;
   }
 
   arrow::Result<int64_t>
   Decompress(int64_t input_len, const uint8_t* input, int64_t output_buffer_len, uint8_t* output_buffer) override {
-    return dedicated_->doDecompressData(input, input_len, output_buffer, output_buffer_len);
+    auto size = dedicated_->doDecompressData(input, input_len, output_buffer, output_buffer_len);
+    if (size == -1) {
+      return arrow::Status::Invalid("Decompress error.");
+    }
+    return size;
   }
 
   int64_t MaxCompressedLen(int64_t input_len, const uint8_t* ARROW_ARG_UNUSED(input)) override {

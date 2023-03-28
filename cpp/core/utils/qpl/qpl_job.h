@@ -36,8 +36,8 @@ class IAAJob;
 class IAADeflateCodec {
  public:
   explicit IAADeflateCodec(qpl_compression_levels compressionLevel) : compressionLevel_(compressionLevel){};
-  uint32_t doCompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t dest_size);
-  uint32_t doDecompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t uncompressed_size);
+  int64_t doCompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t dest_size);
+  int64_t doDecompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t uncompressed_size);
 
  private:
   qpl_compression_levels compressionLevel_ = qpl_default_level;
