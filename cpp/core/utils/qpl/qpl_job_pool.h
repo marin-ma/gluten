@@ -57,6 +57,7 @@ class QplJobHWPool {
  private:
   QplJobHWPool();
   ~QplJobHWPool();
+  static void InitJobPool();
   bool tryLockJob(uint32_t index);
   void unLockJob(uint32_t index);
 
