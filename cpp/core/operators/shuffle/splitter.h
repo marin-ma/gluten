@@ -22,6 +22,7 @@
 #include <arrow/io/api.h>
 #include <arrow/record_batch.h>
 #include <arrow/type_traits.h>
+#include <arrow/util/thread_pool.h>
 
 #include <random>
 
@@ -33,6 +34,9 @@
 #include "substrait/algebra.pb.h"
 
 namespace gluten {
+
+arrow::internal::ThreadPool* GetCompressionThreadPool();
+
 class Splitter : public SplitterBase {
  protected:
   struct BinaryBuff {
@@ -169,6 +173,8 @@ class Splitter : public SplitterBase {
 
   arrow::Result<std::shared_ptr<arrow::ipc::IpcPayload>> GetSchemaPayload();
 
+  inline void WaitForLastBatch();
+
   class PartitionWriter;
 
   // Check whether support AVX512 instructions
@@ -247,6 +253,8 @@ class Splitter : public SplitterBase {
 
   // shared by all partition writers
   std::shared_ptr<arrow::ipc::IpcPayload> schema_payload_;
+
+  std::shared_ptr<arrow::internal::ThreadPool> compression_thread_pool_;
 };
 
 class RoundRobinSplitter final : public Splitter {

@@ -312,6 +312,23 @@ arrow::Status Splitter::Init() {
 
   RETURN_NOT_OK(SetCompressType(options_.compression_type));
 
+  // Get Async compression env
+  auto async_compression_enabled = std::getenv("GLUTEN_ENABLE_ASYNC_COMPRESSION");
+  if (async_compression_enabled != nullptr &&
+      (strcmp(async_compression_enabled, "TRUE") == 0 || strcmp(async_compression_enabled, "true") == 0)) {
+    options_.async_compress = true;
+  }
+  if (options_.async_compress) {
+    auto maybe_pool = arrow::internal::ThreadPool::Make(options_.compression_thread_pool_size);
+    if (!maybe_pool.ok()) {
+      maybe_pool.status().Warn("Failed to create compression thread pool");
+      options_.async_compress = false;
+    } else {
+      std::cout << "Created compression thread pool with size " << options_.compression_thread_pool_size << std::endl;
+      compression_thread_pool_ = *std::move(maybe_pool);
+    }
+  }
+
   auto& ipc_write_options = options_.ipc_write_options;
   ipc_write_options.memory_pool = options_.memory_pool.get();
   ipc_write_options.use_threads = false;
@@ -326,6 +343,7 @@ arrow::Status Splitter::Init() {
 
   return arrow::Status::OK();
 }
+
 arrow::Status Splitter::AllocateBufferFromPool(std::shared_ptr<arrow::Buffer>& buffer, uint32_t size) {
   // if size is already larger than buffer pool size, allocate it directly
   // make size 64byte aligned
@@ -376,6 +394,8 @@ arrow::Status Splitter::Stop() {
   } else {
     data_file_os_ = fout;
   }
+
+  TIME_NANO(total_sync_wait_time_, WaitForLastBatch());
 
   // stop PartitionWriter and collect metrics
   for (auto pid = 0; pid < num_partitions_; ++pid) {
@@ -704,14 +724,20 @@ arrow::Status Splitter::SpillPartition(int32_t partition_id) {
   TIME_NANO_OR_RAISE(total_evict_time_, partition_writer_[partition_id]->Spill());
 
   // reset validity buffer after spill
-  std::for_each(
-      partition_buffers_.begin(), partition_buffers_.end(), [partition_id](std::vector<arrow::BufferVector>& bufs) {
-        if (bufs[partition_id].size() != 0 && bufs[partition_id][0] != nullptr) {
-          // initialize all true once allocated
-          auto addr = bufs[partition_id][0]->mutable_data();
-          memset(addr, 0xff, bufs[partition_id][0]->capacity());
-        }
-      });
+  // TODO: No need to reset if reallocate buffers?
+  if (!options_.async_compress) {
+    std::for_each(
+        partition_buffers_.begin(),
+        partition_buffers_.end(),
+        [partition_id](std::vector<arrow::BufferVector>& bufs) {
+          if (bufs[partition_id].size() != 0 &&
+              bufs[partition_id][0] != nullptr) {
+            // initialize all true once allocated
+            auto addr = bufs[partition_id][0]->mutable_data();
+            memset(addr, 0xff, bufs[partition_id][0]->capacity());
+          }
+        });
+  }
 
   return arrow::Status::OK();
 }
@@ -825,6 +851,8 @@ arrow::Status Splitter::DoSplit(const arrow::RecordBatch& rb) {
     }
   }
 
+  TIME_NANO(total_sync_wait_time_, WaitForLastBatch());
+
   // prepare partition buffers and spill if necessary
   for (auto pid = 0; pid < num_partitions_; ++pid) {
     if (partition_id_cnt_[pid] > 0) {
@@ -841,19 +869,34 @@ arrow::Status Splitter::DoSplit(const arrow::RecordBatch& rb) {
           // if prefer_spill is set, spill current record batch, we may reuse
           // the buffers
 
-          if (new_size > (unsigned)partition_buffer_size_[pid]) {
-            // if the partition size after split is already larger than
-            // allocated buffer size, need reallocate
-            RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ true));
-
-            // splill immediately
-            RETURN_NOT_OK(SpillPartition(pid));
+          if (options_.async_compress) {
+            ARROW_ASSIGN_OR_RAISE(
+                auto batch, MakeRecordBatch(pid, /*reset_buffers = */ false));
+            RETURN_NOT_OK(compression_thread_pool_->Spawn([=]() {
+              // TODO: Handle not ok in thread.
+              CacheRecordBatchPayload(pid, batch);
+              // spill immediately
+              SpillPartition(pid);
+#ifdef GLUTEN_PRINT_DEBUG
+              std::cout << "pid " << pid << " done compression." << std::endl;
+#endif
+            }));
             RETURN_NOT_OK(AllocatePartitionBuffers(pid, new_size));
           } else {
-            // partition size after split is smaller than buffer size, no need
-            // to reset buffer, reuse it.
-            RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ false));
-            RETURN_NOT_OK(SpillPartition(pid));
+            if (new_size > (unsigned)partition_buffer_size_[pid]) {
+              // if the partition size after split is already larger than
+              // allocated buffer size, need reallocate
+              RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ true));
+
+              // splill immediately
+              RETURN_NOT_OK(SpillPartition(pid));
+              RETURN_NOT_OK(AllocatePartitionBuffers(pid, new_size));
+            } else {
+              // partition size after split is smaller than buffer size, no need
+              // to reset buffer, reuse it.
+              RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ false));
+              RETURN_NOT_OK(SpillPartition(pid));
+            }
           }
         } else {
           // if prefer_spill is disabled, cache the record batch
@@ -1284,6 +1327,12 @@ arrow::Result<std::shared_ptr<arrow::ipc::IpcPayload>> Splitter::GetSchemaPayloa
   return schema_payload_;
 }
 
+void Splitter::WaitForLastBatch() {
+  if (options_.async_compress) {
+    compression_thread_pool_->WaitForIdle();
+  }
+}
+
 // ----------------------------------------------------------------------
 // RoundRobinSplitter
 
@@ -1378,6 +1427,8 @@ arrow::Status SinglePartSplitter::Stop() {
     data_file_os_ = fout;
   }
 
+  TIME_NANO(total_sync_wait_time_, WaitForLastBatch());
+
   // stop PartitionWriter and collect metrics
   for (auto pid = 0; pid < num_partitions_; ++pid) {
     if (partition_cached_recordbatch_size_[pid] > 0) {
@@ -1439,8 +1490,8 @@ arrow::Status HashSplitter::ComputeAndCountPartitionId(const arrow::RecordBatch&
         "lea (%[num_partitions],%[pid],1),%[tmp]\n"
         "test %[pid],%[pid]\n"
         "cmovs %[tmp],%[pid]\n"
-        : [pid] "+r"(pid)
-        : [num_partitions] "r"(num_partitions_), [tmp] "r"(0));
+        : [ pid ] "+r"(pid)
+        : [ num_partitions ] "r"(num_partitions_), [ tmp ] "r"(0));
 #else
     if (pid < 0)
       pid += num_partitions_;
