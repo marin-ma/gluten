@@ -159,7 +159,9 @@ class Splitter : public SplitterBase {
   // 2. Stop the splitter. The record batch will be written to disk immediately.
   arrow::Status CreateRecordBatchFromBuffer(int32_t partition_id, bool reset_buffers);
 
-  arrow::Status CacheRecordBatch(int32_t partition_id, const arrow::RecordBatch& batch);
+  arrow::Result<std::shared_ptr<arrow::RecordBatch>> CreateRecordBatch(int32_t partition_id, bool reset_buffers);
+
+  arrow::Status CacheRecordBatchPayload(int32_t partition_id, const arrow::RecordBatch& batch);
 
   // Allocate new partition buffer/builder.
   // If successful, will point partition buffer/builder to new ones, otherwise

@@ -446,7 +446,7 @@ int64_t batch_nbytes(const arrow::RecordBatch& batch) {
 }
 } // anonymous namespace
 
-arrow::Status Splitter::CacheRecordBatch(int32_t partition_id, const arrow::RecordBatch& batch) {
+arrow::Status Splitter::CacheRecordBatchPayload(int32_t partition_id, const arrow::RecordBatch& batch) {
   int64_t raw_size = batch_nbytes(batch);
   raw_partition_lengths_[partition_id] += raw_size;
   auto payload = std::make_shared<arrow::ipc::IpcPayload>();
@@ -473,6 +473,11 @@ arrow::Status Splitter::CacheRecordBatch(int32_t partition_id, const arrow::Reco
 }
 
 arrow::Status Splitter::CreateRecordBatchFromBuffer(int32_t partition_id, bool reset_buffers) {
+    ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(partition_id, reset_buffers));
+    return CacheRecordBatchPayload(partition_id, *batch);
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>> Splitter::CreateRecordBatch(int32_t partition_id, bool reset_buffers) {
   if (partition_buffer_idx_base_[partition_id] <= 0) {
     return arrow::Status::OK();
   }
@@ -579,8 +584,7 @@ arrow::Status Splitter::CreateRecordBatchFromBuffer(int32_t partition_id, bool r
       }
     }
   }
-  auto batch = arrow::RecordBatch::Make(schema_, num_rows, std::move(arrays));
-  return CacheRecordBatch(partition_id, *batch);
+  return arrow::RecordBatch::Make(schema_, num_rows, std::move(arrays));
 }
 
 arrow::Status Splitter::AllocatePartitionBuffers(int32_t partition_id, int32_t new_size) {
@@ -871,10 +875,10 @@ arrow::Status Splitter::DoSplit(const arrow::RecordBatch& rb) {
 
           if (options_.async_compress) {
             ARROW_ASSIGN_OR_RAISE(
-                auto batch, MakeRecordBatch(pid, /*reset_buffers = */ false));
+                auto batch, CreateRecordBatch(pid, /*reset_buffers = */ false));
             RETURN_NOT_OK(compression_thread_pool_->Spawn([=]() {
               // TODO: Handle not ok in thread.
-              CacheRecordBatchPayload(pid, batch);
+              CacheRecordBatchPayload(pid, *batch);
               // spill immediately
               SpillPartition(pid);
 #ifdef GLUTEN_PRINT_DEBUG
@@ -1409,7 +1413,7 @@ arrow::Status SinglePartSplitter::Split(ColumnarBatch* batch) {
     schema_ = rb->schema();
     RETURN_NOT_OK(InitColumnType());
   }
-  RETURN_NOT_OK(CacheRecordBatch(0, *rb));
+  RETURN_NOT_OK(CacheRecordBatchPayload(0, *rb));
   EVAL_END("split", options_.thread_id, options_.task_attempt_id)
   return arrow::Status::OK();
 }

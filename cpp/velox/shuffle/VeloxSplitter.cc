@@ -1305,7 +1305,7 @@ arrow::Status VeloxSinglePartSplitter::Split(ColumnarBatch* cb) {
   auto result = arrow::ImportRecordBatch(&arrowArray, schema_);
   RETURN_NOT_OK(result);
 
-  // 2. call CacheRecordBatch with RecordBatch
+  // 2. call CacheRecordBatchPayload with RecordBatch
   RETURN_NOT_OK(CacheRecordBatch(0, *(*result)));
 
   return arrow::Status::OK();
