@@ -447,8 +447,6 @@ int64_t batch_nbytes(const arrow::RecordBatch& batch) {
 } // anonymous namespace
 
 arrow::Status Splitter::CacheRecordBatchPayload(int32_t partition_id, const arrow::RecordBatch& batch) {
-  int64_t raw_size = batch_nbytes(batch);
-  raw_partition_lengths_[partition_id] += raw_size;
   auto payload = std::make_shared<arrow::ipc::IpcPayload>();
   int64_t batch_compress_time = 0;
 #ifndef SKIPCOMPRESS
@@ -468,16 +466,17 @@ arrow::Status Splitter::CacheRecordBatchPayload(int32_t partition_id, const arro
   total_compress_time_ += batch_compress_time;
   partition_cached_recordbatch_size_[partition_id] += payload->body_length;
   partition_cached_recordbatch_[partition_id].push_back(std::move(payload));
-  partition_buffer_idx_base_[partition_id] = 0;
   return arrow::Status::OK();
 }
 
 arrow::Status Splitter::CreateRecordBatchFromBuffer(int32_t partition_id, bool reset_buffers) {
-    ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(partition_id, reset_buffers));
-    return CacheRecordBatchPayload(partition_id, *batch);
+  ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(partition_id, reset_buffers));
+  return CacheRecordBatchPayload(partition_id, *batch);
 }
 
-arrow::Result<std::shared_ptr<arrow::RecordBatch>> Splitter::CreateRecordBatch(int32_t partition_id, bool reset_buffers) {
+arrow::Result<std::shared_ptr<arrow::RecordBatch>> Splitter::CreateRecordBatch(
+    int32_t partition_id,
+    bool reset_buffers) {
   if (partition_buffer_idx_base_[partition_id] <= 0) {
     return arrow::Status::OK();
   }
@@ -584,7 +583,12 @@ arrow::Result<std::shared_ptr<arrow::RecordBatch>> Splitter::CreateRecordBatch(i
       }
     }
   }
-  return arrow::RecordBatch::Make(schema_, num_rows, std::move(arrays));
+  auto batch = arrow::RecordBatch::Make(schema_, num_rows, std::move(arrays));
+  int64_t raw_size = batch_nbytes(*batch);
+  raw_partition_lengths_[partition_id] += raw_size;
+  partition_buffer_idx_base_[partition_id] = 0;
+
+  return batch;
 }
 
 arrow::Status Splitter::AllocatePartitionBuffers(int32_t partition_id, int32_t new_size) {
@@ -731,11 +735,8 @@ arrow::Status Splitter::SpillPartition(int32_t partition_id) {
   // TODO: No need to reset if reallocate buffers?
   if (!options_.async_compress) {
     std::for_each(
-        partition_buffers_.begin(),
-        partition_buffers_.end(),
-        [partition_id](std::vector<arrow::BufferVector>& bufs) {
-          if (bufs[partition_id].size() != 0 &&
-              bufs[partition_id][0] != nullptr) {
+        partition_buffers_.begin(), partition_buffers_.end(), [partition_id](std::vector<arrow::BufferVector>& bufs) {
+          if (bufs[partition_id].size() != 0 && bufs[partition_id][0] != nullptr) {
             // initialize all true once allocated
             auto addr = bufs[partition_id][0]->mutable_data();
             memset(addr, 0xff, bufs[partition_id][0]->capacity());
@@ -874,13 +875,15 @@ arrow::Status Splitter::DoSplit(const arrow::RecordBatch& rb) {
           // the buffers
 
           if (options_.async_compress) {
-            ARROW_ASSIGN_OR_RAISE(
-                auto batch, CreateRecordBatch(pid, /*reset_buffers = */ false));
+            ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(pid, /*reset_buffers = */ false));
             RETURN_NOT_OK(compression_thread_pool_->Spawn([=]() {
               // TODO: Handle not ok in thread.
-              CacheRecordBatchPayload(pid, *batch);
+              std::cout << " In async thread" << std::endl;
+              if (batch != nullptr) {
+                auto status = CacheRecordBatchPayload(pid, *batch);
+              }
               // spill immediately
-              SpillPartition(pid);
+              auto status = SpillPartition(pid);
 #ifdef GLUTEN_PRINT_DEBUG
               std::cout << "pid " << pid << " done compression." << std::endl;
 #endif
@@ -1402,6 +1405,7 @@ arrow::Status SinglePartSplitter::Init() {
   tiny_bach_write_options_ = ipc_write_options;
   tiny_bach_write_options_.codec = nullptr;
 
+  options_.async_compress = false;
   return arrow::Status::OK();
 }
 
@@ -1494,8 +1498,8 @@ arrow::Status HashSplitter::ComputeAndCountPartitionId(const arrow::RecordBatch&
         "lea (%[num_partitions],%[pid],1),%[tmp]\n"
         "test %[pid],%[pid]\n"
         "cmovs %[tmp],%[pid]\n"
-        : [ pid ] "+r"(pid)
-        : [ num_partitions ] "r"(num_partitions_), [ tmp ] "r"(0));
+        : [pid] "+r"(pid)
+        : [num_partitions] "r"(num_partitions_), [tmp] "r"(0));
 #else
     if (pid < 0)
       pid += num_partitions_;
