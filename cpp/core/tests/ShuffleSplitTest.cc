@@ -159,6 +159,7 @@ class SplitterTest : public ::testing::TestWithParam<bool> {
     MakeInputBatch(hash_input_data_1, hash_schema_, &hash_input_batch_1_);
     MakeInputBatch(hash_input_data_2, hash_schema_, &hash_input_batch_2_);
     split_options_ = SplitOptions::Defaults();
+    split_options_.async_compress = GetParam();
   }
 
   void TearDown() override {
@@ -258,7 +259,6 @@ std::shared_ptr<ColumnarBatch> RecordBatchToColumnarBatch(std::shared_ptr<arrow:
 }
 
 TEST_P(SplitterTest, TestSingleSplitter) {
-  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 10;
 
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("single", 1, split_options_))
@@ -304,7 +304,6 @@ TEST_P(SplitterTest, TestSingleSplitter) {
 
 TEST_P(SplitterTest, TestRoundRobinSplitter) {
   int32_t num_partitions = 2;
-  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("rr", num_partitions, split_options_));
 
@@ -371,7 +370,6 @@ TEST_P(SplitterTest, TestSplitterMemoryLeak) {
   std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(17 * 1024 * 1024);
 
   int32_t num_partitions = 2;
-  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
   split_options_.memory_pool = pool;
   split_options_.write_schema = false;
@@ -391,7 +389,6 @@ TEST_P(SplitterTest, TestSplitterMemoryLeak) {
 
 TEST_P(SplitterTest, TestHashSplitter) {
   int32_t num_partitions = 2;
-  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
 
   ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("hash", num_partitions, split_options_))
@@ -427,7 +424,6 @@ TEST_P(SplitterTest, TestHashSplitter) {
 
 TEST_P(SplitterTest, TestFallbackRangeSplitter) {
   int32_t num_partitions = 2;
-  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
 
   std::shared_ptr<arrow::Array> pid_arr_0;
