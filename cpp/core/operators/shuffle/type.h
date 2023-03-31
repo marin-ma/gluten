@@ -52,7 +52,6 @@ struct SplitOptions {
   int32_t push_buffer_max_size = kDefaultSplitterBufferSize;
   int32_t num_sub_dirs = kDefaultNumSubDirs;
   int32_t batch_compress_threshold = kDefaultBatchCompressThreshold;
-  int32_t qat_compress_threshold = -1;
   int32_t compression_thread_pool_size = kDefaultCompressionThreadPoolSize;
 
   arrow::Compression::type compression_type = arrow::Compression::UNCOMPRESSED;

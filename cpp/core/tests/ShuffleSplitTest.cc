@@ -160,6 +160,7 @@ class SplitterTest : public ::testing::TestWithParam<bool> {
     MakeInputBatch(hash_input_data_2, hash_schema_, &hash_input_batch_2_);
     split_options_ = SplitOptions::Defaults();
     split_options_.async_compress = GetParam();
+    split_options_.compression_thread_pool_size = 2;
   }
 
   void TearDown() override {
@@ -500,19 +501,19 @@ TEST_P(SplitterTest, TestFallbackRangeSplitter) {
   }
 }
 
-//TEST_P(SplitterTest, TestSpillFailWithOutOfMemory) {
-//  auto pool = std::make_shared<MyMemoryPool>(0);
-//
-//  int32_t num_partitions = 2;
-//  split_options_.buffer_size = 4;
-//  split_options_.memory_pool = pool;
-//  ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("rr", num_partitions, split_options_));
-//
-//  auto status = splitter_->Split(RecordBatchToColumnarBatch(input_batch_1_).get());
-//  // should return OOM status because there's no partition buffer to spill
-//  ASSERT_TRUE(status.IsOutOfMemory());
-//  ASSERT_NOT_OK(splitter_->Stop());
-//}
+TEST_P(SplitterTest, TestSpillFailWithOutOfMemory) {
+  auto pool = std::make_shared<MyMemoryPool>(0);
+
+  int32_t num_partitions = 2;
+  split_options_.buffer_size = 4;
+  split_options_.memory_pool = pool;
+  ARROW_ASSIGN_OR_THROW(splitter_, Splitter::Make("rr", num_partitions, split_options_));
+
+  auto status = splitter_->Split(RecordBatchToColumnarBatch(input_batch_1_).get());
+  // should return OOM status because there's no partition buffer to spill
+  ASSERT_TRUE(status.IsOutOfMemory());
+  ASSERT_NOT_OK(splitter_->Stop());
+}
 
 TEST_P(SplitterTest, TestSpillLargestPartition) {
   std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(9 * 1024 * 1024);

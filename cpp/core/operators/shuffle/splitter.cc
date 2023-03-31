@@ -470,15 +470,18 @@ arrow::Status Splitter::CacheRecordBatchPayload(int32_t partition_id, const arro
 }
 
 arrow::Status Splitter::CreateRecordBatchFromBuffer(int32_t partition_id, bool reset_buffers) {
-  ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(partition_id, reset_buffers));
-  return CacheRecordBatchPayload(partition_id, *batch);
+  if (partition_buffer_idx_base_[partition_id] > 0) {
+    ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(partition_id, reset_buffers));
+    return CacheRecordBatchPayload(partition_id, *batch);
+  }
+  return arrow::Status::OK();
 }
 
 arrow::Result<std::shared_ptr<arrow::RecordBatch>> Splitter::CreateRecordBatch(
     int32_t partition_id,
     bool reset_buffers) {
   if (partition_buffer_idx_base_[partition_id] <= 0) {
-    return arrow::Status::OK();
+    return nullptr;
   }
   // already filled
   auto fixed_width_idx = 0;
