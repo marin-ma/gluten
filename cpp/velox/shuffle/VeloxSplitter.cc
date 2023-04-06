@@ -140,6 +140,23 @@ arrow::Status VeloxSplitter::Init() {
     ARROW_ASSIGN_OR_RAISE(options_.data_file, CreateTempShuffleFile(configured_dirs_[0]));
   }
 
+  // Get Async compression env
+  auto async_compression_enabled = std::getenv("GLUTEN_ENABLE_ASYNC_COMPRESSION");
+  if (async_compression_enabled != nullptr &&
+      (strcmp(async_compression_enabled, "TRUE") == 0 || strcmp(async_compression_enabled, "true") == 0)) {
+    options_.async_compress = true;
+  }
+  if (options_.async_compress) {
+    auto maybe_pool = arrow::internal::ThreadPool::Make(options_.compression_thread_pool_size);
+    if (!maybe_pool.ok()) {
+      maybe_pool.status().Warn("Failed to create compression thread pool");
+      options_.async_compress = false;
+    } else {
+      std::cout << "Created compression thread pool with size " << options_.compression_thread_pool_size << std::endl;
+      compression_thread_pool_ = *std::move(maybe_pool);
+    }
+  }
+
   RETURN_NOT_OK(SetCompressType(options_.compression_type));
 
   RETURN_NOT_OK(InitIpcWriteOptions());
@@ -217,6 +234,8 @@ arrow::Status VeloxSplitter::Stop() {
   } else {
     data_file_os_ = fout;
   }
+
+  WaitForLastBatch();
 
   // stop PartitionWriter and collect metrics
   for (auto pid = 0; pid < num_partitions_; ++pid) {
@@ -316,6 +335,8 @@ arrow::Status VeloxSplitter::DoSplit(const velox::RowVector& rv) {
 
   RETURN_NOT_OK(UpdateInputHasNull(rv));
 
+  WaitForLastBatch();
+
   for (auto pid = 0; pid < num_partitions_; ++pid) {
     if (partition_2_row_count_[pid] > 0) {
       // make sure the size to be allocated is larger than the size to be filled
@@ -327,20 +348,37 @@ arrow::Status VeloxSplitter::DoSplit(const velox::RowVector& rv) {
         auto new_size = std::max(CalculatePartitionBufferSize(rv), partition_2_row_count_[pid]);
         // if the size to be filled + allready filled > the buffer size, need to allocate new buffer
         if (options_.prefer_spill) {
-          // if prefer_spill is set, spill current RowVector, we may reuse the buffers
-          if (new_size > partition_2_buffer_size_[pid]) {
-            // if the partition size after split is already larger than
-            // allocated buffer size, need reallocate
-            RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ true));
-
-            // splill immediately
-            RETURN_NOT_OK(SpillPartition(pid));
+          if (options_.async_compress) {
+            ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(pid, /*reset_buffers = */ false));
+            RETURN_NOT_OK(compression_thread_pool_->Spawn([=]() {
+              // TODO: Handle not ok in thread.
+              std::cout << " In async thread" << std::endl;
+              if (batch != nullptr) {
+                auto status = CacheRecordBatchPayload(pid, *batch);
+              }
+              // spill immediately
+              auto status = SpillPartition(pid);
+#ifdef GLUTEN_PRINT_DEBUG
+              std::cout << "pid " << pid << " done compression." << std::endl;
+#endif
+            }));
             RETURN_NOT_OK(AllocatePartitionBuffers(pid, new_size));
           } else {
-            // partition size after split is smaller than buffer size, no need
-            // to reset buffer, reuse it.
-            RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ false));
-            RETURN_NOT_OK(SpillPartition(pid));
+            // if prefer_spill is set, spill current RowVector, we may reuse the buffers
+            if (new_size > partition_2_buffer_size_[pid]) {
+              // if the partition size after split is already larger than
+              // allocated buffer size, need reallocate
+              RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ true));
+
+              // splill immediately
+              RETURN_NOT_OK(SpillPartition(pid));
+              RETURN_NOT_OK(AllocatePartitionBuffers(pid, new_size));
+            } else {
+              // partition size after split is smaller than buffer size, no need
+              // to reset buffer, reuse it.
+              RETURN_NOT_OK(CreateRecordBatchFromBuffer(pid, /*reset_buffers = */ false));
+              RETURN_NOT_OK(SpillPartition(pid));
+            }
           }
         } else {
           // if prefer_spill is disabled, cache the record batch
@@ -1021,8 +1059,39 @@ arrow::Status VeloxSplitter::AllocateNew(uint32_t partition_id, uint32_t new_siz
 }
 
 arrow::Status VeloxSplitter::CreateRecordBatchFromBuffer(uint32_t partition_id, bool reset_buffers) {
-  if (partition_buffer_idx_base_[partition_id] <= 0) {
-    return arrow::Status::OK();
+  if (partition_buffer_idx_base_[partition_id] > 0) {
+    ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(partition_id, reset_buffers));
+    return CacheRecordBatchPayload(partition_id, *batch);
+  }
+  return arrow::Status::OK();
+}
+
+namespace {
+
+int64_t get_batch_nbytes(const arrow::RecordBatch& rb) {
+  int64_t accumulated = 0L;
+
+  for (const auto& array : rb.columns()) {
+    if (array == nullptr || array->data() == nullptr) {
+      continue;
+    }
+    for (const auto& buf : array->data()->buffers) {
+      if (buf == nullptr) {
+        continue;
+      }
+      accumulated += buf->size();
+    }
+  }
+  return accumulated;
+}
+
+} // namespace
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>> VeloxSplitter::CreateRecordBatch(
+    uint32_t partition_id,
+    bool reset_buffers) {
+  if (partition_buffer_idx_base_[partition_id] == 0) {
+    return nullptr;
   }
 
   // already filled
@@ -1134,33 +1203,14 @@ arrow::Status VeloxSplitter::CreateRecordBatchFromBuffer(uint32_t partition_id, 
     }
   }
   auto rb = arrow::RecordBatch::Make(schema_, num_rows, std::move(arrays));
-  return CacheRecordBatch(partition_id, *rb);
-}
-
-namespace {
-
-int64_t get_batch_nbytes(const arrow::RecordBatch& rb) {
-  int64_t accumulated = 0L;
-
-  for (const auto& array : rb.columns()) {
-    if (array == nullptr || array->data() == nullptr) {
-      continue;
-    }
-    for (const auto& buf : array->data()->buffers) {
-      if (buf == nullptr) {
-        continue;
-      }
-      accumulated += buf->size();
-    }
-  }
-  return accumulated;
-}
-
-} // namespace
-
-arrow::Status VeloxSplitter::CacheRecordBatch(uint32_t partition_id, const arrow::RecordBatch& rb) {
-  int64_t raw_size = get_batch_nbytes(rb);
+  int64_t raw_size = get_batch_nbytes(*rb);
   raw_partition_lengths_[partition_id] += raw_size;
+  partition_buffer_idx_base_[partition_id] = 0;
+
+  return rb;
+}
+
+arrow::Status VeloxSplitter::CacheRecordBatchPayload(uint32_t partition_id, const arrow::RecordBatch& rb) {
   auto payload = std::make_shared<arrow::ipc::IpcPayload>();
 #ifndef SKIPCOMPRESS
   if (rb.num_rows() <= (uint32_t)options_.batch_compress_threshold) {
@@ -1178,7 +1228,6 @@ arrow::Status VeloxSplitter::CacheRecordBatch(uint32_t partition_id, const arrow
 
   partition_cached_recordbatch_size_[partition_id] += payload->body_length;
   partition_cached_recordbatch_[partition_id].push_back(std::move(payload));
-  partition_buffer_idx_base_[partition_id] = 0;
   return arrow::Status::OK();
 }
 
@@ -1227,15 +1276,17 @@ arrow::Status VeloxSplitter::SpillPartition(uint32_t partition_id) {
   }
   TIME_NANO_OR_RAISE(total_evict_time_, partition_writer_[partition_id]->Spill());
 
-  // reset validity buffer after spill
-  std::for_each(
-      partition_buffers_.begin(), partition_buffers_.end(), [partition_id](std::vector<arrow::BufferVector>& bufs) {
-        if (bufs[partition_id].size() != 0 && bufs[partition_id][0] != nullptr) {
-          // initialize all true once allocated
-          auto addr = bufs[partition_id][0]->mutable_data();
-          memset(addr, 0xff, bufs[partition_id][0]->capacity());
-        }
-      });
+  if (!options_.async_compress) {
+    // reset validity buffer after spill
+    std::for_each(
+        partition_buffers_.begin(), partition_buffers_.end(), [partition_id](std::vector<arrow::BufferVector>& bufs) {
+          if (bufs[partition_id].size() != 0 && bufs[partition_id][0] != nullptr) {
+            // initialize all true once allocated
+            auto addr = bufs[partition_id][0]->mutable_data();
+            memset(addr, 0xff, bufs[partition_id][0]->capacity());
+          }
+        });
+  }
 
   return arrow::Status::OK();
 }
@@ -1281,6 +1332,9 @@ arrow::Status VeloxSinglePartSplitter::Init() {
 
   RETURN_NOT_OK(InitIpcWriteOptions());
 
+  // Disable Async compression if only one reducer.
+  options_.async_compress = false;
+
   return arrow::Status::OK();
 }
 
@@ -1306,7 +1360,7 @@ arrow::Status VeloxSinglePartSplitter::Split(ColumnarBatch* cb) {
   RETURN_NOT_OK(result);
 
   // 2. call CacheRecordBatchPayload with RecordBatch
-  RETURN_NOT_OK(CacheRecordBatch(0, *(*result)));
+  RETURN_NOT_OK(CacheRecordBatchPayload(0, *(*result)));
 
   return arrow::Status::OK();
 }
@@ -1346,6 +1400,12 @@ arrow::Status VeloxSinglePartSplitter::Stop() {
   RETURN_NOT_OK(data_file_os_->Close());
 
   return arrow::Status::OK();
+}
+
+void VeloxSplitter::WaitForLastBatch() {
+  if (options_.async_compress) {
+    compression_thread_pool_->WaitForIdle();
+  }
 }
 
 // VeloxHashSplitter

@@ -158,6 +158,9 @@ class VeloxSplitterTest : public ::testing::TestWithParam<bool> {
     MakeInputBatch(hash_input_data_2, hash_schema_, &hash_input_batch_2_);
 
     split_options_ = SplitOptions::Defaults();
+
+    split_options_.async_compress = GetParam();
+    split_options_.compression_thread_pool_size = 2;
   }
 
   void TearDown() override {
@@ -263,7 +266,6 @@ TEST_P(VeloxSplitterTest, TestHashSplitter) {
 }
 
 TEST_P(VeloxSplitterTest, TestSingleSplitter) {
-  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 10;
 
   ARROW_ASSIGN_OR_THROW(splitter_, VeloxSplitter::Make("single", 1, split_options_))
@@ -308,7 +310,6 @@ TEST_P(VeloxSplitterTest, TestSingleSplitter) {
 
 TEST_P(VeloxSplitterTest, TestRoundRobinSplitter) {
   int32_t num_partitions = 2;
-  split_options_.async_compress = GetParam();
   split_options_.buffer_size = 4;
   ARROW_ASSIGN_OR_THROW(splitter_, VeloxSplitter::Make("rr", num_partitions, split_options_));
 

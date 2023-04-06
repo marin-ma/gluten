@@ -204,9 +204,11 @@ class VeloxSplitter : public SplitterBase {
 
   arrow::Status AllocateNew(uint32_t partition_id, uint32_t new_size);
 
+  arrow::Result<std::shared_ptr<arrow::RecordBatch>> CreateRecordBatch(uint32_t partition_id, bool reset_buffers);
+
   arrow::Status CreateRecordBatchFromBuffer(uint32_t partition_id, bool reset_buffers);
 
-  arrow::Status CacheRecordBatch(uint32_t partition_id, const arrow::RecordBatch& rb);
+  arrow::Status CacheRecordBatchPayload(uint32_t partition_id, const arrow::RecordBatch& rb);
 
   arrow::Status SplitFixedWidthValueBuffer(const facebook::velox::RowVector& rv);
 
@@ -247,6 +249,8 @@ class VeloxSplitter : public SplitterBase {
   arrow::Result<int32_t> SpillLargestPartition(int64_t* size);
 
   arrow::Status SpillPartition(uint32_t partition_id);
+
+  inline void WaitForLastBatch();
 
  protected:
   bool support_avx512_ = false;
@@ -341,6 +345,8 @@ class VeloxSplitter : public SplitterBase {
 
   // shared by all partition writers
   std::shared_ptr<arrow::ipc::IpcPayload> schema_payload_;
+
+  std::shared_ptr<arrow::internal::ThreadPool> compression_thread_pool_;
 }; // class VeloxSplitter
 
 class VeloxRoundRobinSplitter final : public VeloxSplitter {

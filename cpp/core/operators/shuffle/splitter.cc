@@ -1438,8 +1438,6 @@ arrow::Status SinglePartSplitter::Stop() {
     data_file_os_ = fout;
   }
 
-  TIME_NANO(total_sync_wait_time_, WaitForLastBatch());
-
   // stop PartitionWriter and collect metrics
   for (auto pid = 0; pid < num_partitions_; ++pid) {
     if (partition_cached_recordbatch_size_[pid] > 0) {

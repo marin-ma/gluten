@@ -80,6 +80,18 @@ else ()
   message(STATUS "Add definition NDEBUG")
 endif()
 
+if(ENABLE_HBM)
+  add_definitions(-DGLUTEN_ENABLE_HBM)
+endif()
+
+if(ENABLE_QAT)
+  add_definitions(-DGLUTEN_ENABLE_QAT)
+endif()
+
+if(ENABLE_IAA)
+  add_definitions(-DGLUTEN_ENABLE_IAA)
+endif()
+
 add_compile_options(-Wall)
 add_compile_options(-Wno-sign-compare)
 add_compile_options(-Wno-comment)

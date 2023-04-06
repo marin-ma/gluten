@@ -29,7 +29,7 @@
 
 namespace gluten {
 
-#if defined(GLUTEN_ENABLE_QAT) or defined(GLUTEN_ENABLE_IAA)
+#if defined(GLUTEN_ENABLE_QAT) || defined(GLUTEN_ENABLE_IAA)
 static const std::vector<arrow::Compression::type> supported_codec = {
     arrow::Compression::LZ4_FRAME,
     arrow::Compression::ZSTD,

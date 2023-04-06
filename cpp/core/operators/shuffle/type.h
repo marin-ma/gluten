@@ -62,7 +62,7 @@ struct SplitOptions {
 
   bool is_celeborn = false;
 
-  bool async_compress = false;
+  bool async_compress = true;
 
   std::string data_file;
 
