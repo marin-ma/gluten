@@ -25,6 +25,9 @@
 namespace gluten {
 namespace qpl {
 
+const std::vector<uint32_t>
+    kPollingInterval{10, 10, 20, 30, 60, 100, 200, 400, 600, 1000, 2000, 4000, 8000, 16000, 32000, 64000};
+
 class HardwareCodecDeflateQpl {
  public:
   /// RET_ERROR stands for hardware codec fail,need fallback to software codec.
@@ -49,13 +52,28 @@ class HardwareCodecDeflateQpl {
     jobPtr->available_out = dest_size;
     jobPtr->flags = QPL_FLAG_FIRST | QPL_FLAG_DYNAMIC_HUFFMAN | QPL_FLAG_LAST | QPL_FLAG_OMIT_VERIFY;
 
-    if (auto status = qpl_execute_job(jobPtr); status == QPL_STS_OK) {
+    if (auto status = qpl_submit_job(jobPtr); status == QPL_STS_OK) {
+      uint32_t pollingIndex = 0;
+      do {
+        status = qpl_check_job(jobPtr);
+        std::this_thread::sleep_for(std::chrono::microseconds(kPollingInterval[pollingIndex]));
+        if (pollingIndex < kPollingInterval.size() - 1) {
+          ++pollingIndex;
+        }
+      } while (status == QPL_STS_BEING_PROCESSED);
+      if (status != QPL_STS_OK) {
+        ARROW_LOG(WARNING)
+            << "Qpl HW codec failed, falling back to SW codec. (Details: doCompressData->qpl_check_job with error code: "
+            << status << " - please refer to qpl_status in ./contrib/qpl/include/qpl/c_api/status.h)";
+        QplJobHWPool::GetInstance().ReleaseJob(job_id);
+        return RET_ERROR;
+      }
       auto compressed_size = jobPtr->total_out;
       QplJobHWPool::GetInstance().ReleaseJob(job_id);
       return compressed_size;
     } else {
       ARROW_LOG(WARNING)
-          << "DeflateQpl HW codec failed, falling back to SW codec. (Details: doCompressData->qpl_execute_job with error code: "
+          << "Qpl HW codec failed. Falling back to SW codec. (Details: doCompressData->qpl_submit_job with error code: "
           << status << " - please refer to qpl_status in ./contrib/qpl/include/qpl/c_api/status.h)";
       QplJobHWPool::GetInstance().ReleaseJob(job_id);
       return RET_ERROR;
@@ -148,7 +166,7 @@ class SoftwareCodecDeflateQpl final {
   }
 
  private:
-  qpl_job* swJob = nullptr;
+  static thread_local qpl_job* swJob;
   std::unique_ptr<uint8_t[]> sw_buffer;
   qpl_compression_levels compressionLevel_ = qpl_default_level;
 
@@ -169,6 +187,8 @@ class SoftwareCodecDeflateQpl final {
     return swJob;
   }
 };
+
+thread_local qpl_job* SoftwareCodecDeflateQpl::swJob = nullptr;
 
 class QplGzipCodec final : public arrow::util::Codec {
  public:
