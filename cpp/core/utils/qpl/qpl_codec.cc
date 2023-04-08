@@ -115,18 +115,44 @@ class HardwareCodecDeflateQpl {
   qpl_compression_levels compressionLevel_ = qpl_default_level;
 };
 
+class SoftwareQplJob final {
+ public:
+  SoftwareQplJob() = default;
+
+  ~SoftwareQplJob() {
+    if (swJob_) {
+      qpl_fini_job(swJob_);
+    }
+  }
+
+  qpl_job* GetJob() {
+    if (!swJob_) {
+      uint32_t size = 0;
+      qpl_get_job_size(qpl_path_software, &size);
+
+      swJobBuffer_ = std::make_unique<uint8_t[]>(size);
+      swJob_ = reinterpret_cast<qpl_job*>(swJobBuffer_.get());
+
+      // Job initialization
+      if (auto status = qpl_init_job(qpl_path_software, swJob_); status != QPL_STS_OK)
+        throw GlutenException(
+            "Initialization of DeflateQpl software fallback codec failed. (Details: qpl_init_job with error code: " +
+            std::to_string(status) + " - please refer to qpl_status in ./contrib/qpl/include/qpl/c_api/status.h)");
+    }
+    return swJob_;
+  }
+
+ private:
+  std::unique_ptr<uint8_t[]> swJobBuffer_;
+  qpl_job* swJob_;
+};
+
 class SoftwareCodecDeflateQpl final {
  public:
   explicit SoftwareCodecDeflateQpl(qpl_compression_levels compressionLevel) : compressionLevel_(compressionLevel){};
 
-  ~SoftwareCodecDeflateQpl() {
-    if (swJob) {
-      qpl_fini_job(swJob);
-    }
-  }
-
   int64_t doCompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t dest_size) {
-    qpl_job* jobPtr = getJobCodecPtr();
+    qpl_job* jobPtr = swJob.GetJob();
     // Performing a compression operation
     jobPtr->op = qpl_op_compress;
     jobPtr->next_in_ptr = const_cast<uint8_t*>(source);
@@ -146,7 +172,7 @@ class SoftwareCodecDeflateQpl final {
   }
 
   int64_t doDecompressData(const uint8_t* source, uint32_t source_size, uint8_t* dest, uint32_t uncompressed_size) {
-    qpl_job* jobPtr = getJobCodecPtr();
+    qpl_job* jobPtr = swJob.GetJob();
 
     // Performing a decompression operation
     jobPtr->op = qpl_op_decompress;
@@ -166,29 +192,11 @@ class SoftwareCodecDeflateQpl final {
   }
 
  private:
-  static thread_local qpl_job* swJob;
-  std::unique_ptr<uint8_t[]> sw_buffer;
+  static thread_local SoftwareQplJob swJob;
   qpl_compression_levels compressionLevel_ = qpl_default_level;
-
-  qpl_job* getJobCodecPtr() {
-    if (!swJob) {
-      uint32_t size = 0;
-      qpl_get_job_size(qpl_path_software, &size);
-
-      sw_buffer = std::make_unique<uint8_t[]>(size);
-      swJob = reinterpret_cast<qpl_job*>(sw_buffer.get());
-
-      // Job initialization
-      if (auto status = qpl_init_job(qpl_path_software, swJob); status != QPL_STS_OK)
-        throw GlutenException(
-            "Initialization of DeflateQpl software fallback codec failed. (Details: qpl_init_job with error code: " +
-            std::to_string(status) + " - please refer to qpl_status in ./contrib/qpl/include/qpl/c_api/status.h)");
-    }
-    return swJob;
-  }
 };
 
-thread_local qpl_job* SoftwareCodecDeflateQpl::swJob = nullptr;
+thread_local SoftwareQplJob SoftwareCodecDeflateQpl::swJob;
 
 class QplGzipCodec final : public arrow::util::Codec {
  public:

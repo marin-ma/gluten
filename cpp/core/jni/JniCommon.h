@@ -28,10 +28,12 @@
 
 #ifdef GLUTEN_ENABLE_QAT
 #include "utils/qat/qat_util.h"
+static const std::string qat_codec_prefix = "gluten_qat_";
 #endif
 
 #ifdef GLUTEN_ENABLE_IAA
 #include "utils/qpl/qpl_codec.h"
+static const std::string iaa_codec_prefix = "gluten_iaa_";
 #endif
 
 static jint JNI_VERSION = JNI_VERSION_1_8;
@@ -264,14 +266,44 @@ static inline jbyteArray ToSchemaByteArray(JNIEnv* env, std::shared_ptr<arrow::S
   return out;
 }
 
+static inline void RegisterCustomCodec(JNIEnv* env, jstring codec_jstr) {
+  auto codec_u = env->GetStringUTFChars(codec_jstr, JNI_FALSE);
+
+  std::string codec_l;
+  std::transform(codec_u, codec_u + std::strlen(codec_u), std::back_inserter(codec_l), ::tolower);
+#ifdef GLUTEN_ENABLE_QAT
+  if (codec_l.rfind(qat_codec_prefix, 0) == 0) {
+    auto codec = codec_l.substr(qat_codec_prefix.size());
+    if (gluten::qat::SupportsCodec(codec)) {
+      gluten::qat::EnsureQatCodecRegistered(codec);
+    } else {
+      std::string error_message = "Unrecognized compression codec: " + codec_l;
+      env->ReleaseStringUTFChars(codec_jstr, codec_u);
+      throw gluten::GlutenException(error_message);
+    }
+  }
+#endif
+
+#ifdef GLUTEN_ENABLE_IAA
+  if (codec_l.rfind(iaa_codec_prefix, 0) == 0) {
+    auto codec = codec_l.substr(iaa_codec_prefix.size());
+    if (gluten::qpl::SupportsCodec(codec)) {
+      gluten::qpl::EnsureQplCodecRegistered(codec);
+    } else {
+      std::string error_message = "Unrecognized compression codec: " + codec_l;
+      env->ReleaseStringUTFChars(codec_jstr, codec_u);
+      throw gluten::GlutenException(error_message);
+      }
+    }
+#endif
+}
+
 static inline arrow::Result<arrow::Compression::type> GetCompressionType(JNIEnv* env, jstring codec_jstr) {
   auto codec_u = env->GetStringUTFChars(codec_jstr, JNI_FALSE);
 
   std::string codec_l;
   std::transform(codec_u, codec_u + std::strlen(codec_u), std::back_inserter(codec_l), ::tolower);
 #ifdef GLUTEN_ENABLE_QAT
-  // TODO: Support more codec.
-  static const std::string qat_codec_prefix = "gluten_qat_";
   if (codec_l.rfind(qat_codec_prefix, 0) == 0) {
     auto codec = codec_l.substr(qat_codec_prefix.size());
     if (gluten::qat::SupportsCodec(codec)) {
@@ -286,9 +318,8 @@ static inline arrow::Result<arrow::Compression::type> GetCompressionType(JNIEnv*
 #endif
 
 #ifdef GLUTEN_ENABLE_IAA
-  static const std::string qpl_codec_prefix = "gluten_iaa_";
-  if (codec_l.rfind(qpl_codec_prefix, 0) == 0) {
-    auto codec = codec_l.substr(qpl_codec_prefix.size());
+  if (codec_l.rfind(iaa_codec_prefix, 0) == 0) {
+    auto codec = codec_l.substr(iaa_codec_prefix.size());
     if (gluten::qpl::SupportsCodec(codec)) {
       gluten::qpl::EnsureQplCodecRegistered(codec);
       codec_l = "custom";
