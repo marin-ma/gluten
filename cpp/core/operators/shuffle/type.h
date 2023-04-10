@@ -33,7 +33,7 @@ namespace gluten {
 static constexpr int32_t kDefaultSplitterBufferSize = 4096;
 static constexpr int32_t kDefaultNumSubDirs = 64;
 static constexpr int32_t kDefaultBatchCompressThreshold = 256;
-static constexpr int32_t kDefaultCompressionThreadPoolSize = 1;
+static constexpr int32_t kDefaultCompressionThreadPoolSize = 16;
 
 // This 0xFFFFFFFF value is the first 4 bytes of a valid IPC message
 static constexpr int32_t kIpcContinuationToken = -1;

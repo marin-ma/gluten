@@ -63,12 +63,12 @@ class QplJobHWPool {
 
   static inline void CheckJobIndex(uint32_t index) {
     if (index >= MAX_JOB_NUMBER) {
-      throw GlutenException("Index exceeds MAX_JOB_NUMBER 512: " + std::to_string(index));
+      throw GlutenException("Index exceeds MAX_JOB_NUMBER: " + std::to_string(index));
     }
   }
 
   /// Max jobs in QPL_JOB_POOL
-  static constexpr auto MAX_JOB_NUMBER = 512;
+  static constexpr auto MAX_JOB_NUMBER = 1024;
   /// Entire buffer for storing all job objects
   static std::unique_ptr<uint8_t[]> hwJobsBuffer;
   /// Job pool for storing all job object pointers

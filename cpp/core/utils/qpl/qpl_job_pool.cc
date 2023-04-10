@@ -96,7 +96,9 @@ qpl_job* QplJobHWPool::AcquireJob(uint32_t& jobId) {
     }
   }
   jobId = MAX_JOB_NUMBER - index;
+#ifdef GLUTEN_PRINT_DEBUG
   std::cout << "Acquired job index " << index << " after " << retry << " retries." << std::endl;
+#endif
   return jobPool[index];
 }
 

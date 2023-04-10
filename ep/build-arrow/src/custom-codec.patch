@@ -1,6 +1,6 @@
-From 6d7aa045030a7714a28b96a48ceaba6ec49fe0d1 Mon Sep 17 00:00:00 2001
+From 01a9b7c559905ea3d9ae1b09b558296f223d1ead Mon Sep 17 00:00:00 2001
 From: Rong Ma <rong.ma@intel.com>
-Date: Mon, 16 Jan 2023 19:05:02 +0800
+Date: Fri, 7 Apr 2023 17:08:43 +0800
 Subject: [PATCH] Add custom codec
 
 ---
@@ -8,15 +8,15 @@ Subject: [PATCH] Add custom codec
  cpp/src/arrow/ipc/options.cc           |  6 ++++--
  cpp/src/arrow/ipc/options.h            |  3 +++
  cpp/src/arrow/ipc/reader.cc            |  2 ++
- cpp/src/arrow/util/compression.cc      | 14 ++++++++++++++
+ cpp/src/arrow/util/compression.cc      | 19 ++++++++++++++++++-
  cpp/src/arrow/util/compression.h       | 11 +++++++++++
  cpp/src/arrow/util/type_fwd.h          |  3 ++-
  cpp/src/generated/Message_generated.h  | 13 ++++++++-----
  format/Message.fbs                     |  5 ++++-
- 9 files changed, 50 insertions(+), 9 deletions(-)
+ 9 files changed, 54 insertions(+), 10 deletions(-)
 
 diff --git a/cpp/src/arrow/ipc/metadata_internal.cc b/cpp/src/arrow/ipc/metadata_internal.cc
-index d2f2b20d1..f9a67134d 100644
+index 2e450b9d4..87d797732 100644
 --- a/cpp/src/arrow/ipc/metadata_internal.cc
 +++ b/cpp/src/arrow/ipc/metadata_internal.cc
 @@ -936,6 +936,8 @@ static Status GetBodyCompression(FBB& fbb, const IpcWriteOptions& options,
@@ -46,10 +46,10 @@ index e5b14a47f..b038dd6e3 100644
    return Status::OK();
  }
 diff --git a/cpp/src/arrow/ipc/options.h b/cpp/src/arrow/ipc/options.h
-index 2af9d8e9c..037c2fe9c 100644
+index 4206f3619..d77d5737a 100644
 --- a/cpp/src/arrow/ipc/options.h
 +++ b/cpp/src/arrow/ipc/options.h
-@@ -159,6 +159,9 @@ struct ARROW_EXPORT IpcReadOptions {
+@@ -155,6 +155,9 @@ struct ARROW_EXPORT IpcReadOptions {
  
  namespace internal {
  
@@ -60,10 +60,10 @@ index 2af9d8e9c..037c2fe9c 100644
  
  }  // namespace internal
 diff --git a/cpp/src/arrow/ipc/reader.cc b/cpp/src/arrow/ipc/reader.cc
-index 7875cd3cd..74f4b2919 100644
+index a1b17afaa..03237cfbe 100644
 --- a/cpp/src/arrow/ipc/reader.cc
 +++ b/cpp/src/arrow/ipc/reader.cc
-@@ -598,6 +598,8 @@ Status GetCompression(const flatbuf::RecordBatch* batch, Compression::type* out)
+@@ -597,6 +597,8 @@ Status GetCompression(const flatbuf::RecordBatch* batch, Compression::type* out)
        *out = Compression::LZ4_FRAME;
      } else if (compression->codec() == flatbuf::CompressionType::ZSTD) {
        *out = Compression::ZSTD;
@@ -73,10 +73,29 @@ index 7875cd3cd..74f4b2919 100644
        return Status::Invalid("Unsupported codec in RecordBatch::compression metadata");
      }
 diff --git a/cpp/src/arrow/util/compression.cc b/cpp/src/arrow/util/compression.cc
-index c67cb4539..a0da548bf 100644
+index c67cb4539..795bf9b44 100644
 --- a/cpp/src/arrow/util/compression.cc
 +++ b/cpp/src/arrow/util/compression.cc
-@@ -98,6 +98,8 @@ Result<Compression::type> Codec::GetCompressionType(const std::string& name) {
+@@ -49,7 +49,8 @@ const std::string& Codec::GetCodecAsString(Compression::type t) {
+   static const std::string uncompressed = "uncompressed", snappy = "snappy",
+                            gzip = "gzip", lzo = "lzo", brotli = "brotli",
+                            lz4_raw = "lz4_raw", lz4 = "lz4", lz4_hadoop = "lz4_hadoop",
+-                           zstd = "zstd", bz2 = "bz2", unknown = "unknown";
++                           zstd = "zstd", bz2 = "bz2", custom = "custom",
++                           unknown = "unknown";
+ 
+   switch (t) {
+     case Compression::UNCOMPRESSED:
+@@ -72,6 +73,8 @@ const std::string& Codec::GetCodecAsString(Compression::type t) {
+       return zstd;
+     case Compression::BZ2:
+       return bz2;
++    case Compression::CUSTOM:
++      return custom;
+     default:
+       return unknown;
+   }
+@@ -98,6 +101,8 @@ Result<Compression::type> Codec::GetCompressionType(const std::string& name) {
      return Compression::ZSTD;
    } else if (name == "bz2") {
      return Compression::BZ2;
@@ -85,7 +104,7 @@ index c67cb4539..a0da548bf 100644
    } else {
      return Status::Invalid("Unrecognized compression type: ", name);
    }
-@@ -201,6 +203,12 @@ Result<std::unique_ptr<Codec>> Codec::Create(Compression::type codec_type,
+@@ -201,6 +206,12 @@ Result<std::unique_ptr<Codec>> Codec::Create(Compression::type codec_type,
        codec = internal::MakeBZ2Codec(compression_level);
  #endif
        break;
@@ -98,7 +117,7 @@ index c67cb4539..a0da548bf 100644
      default:
        break;
    }
-@@ -254,10 +262,16 @@ bool Codec::IsAvailable(Compression::type codec_type) {
+@@ -254,10 +265,16 @@ bool Codec::IsAvailable(Compression::type codec_type) {
  #else
        return false;
  #endif
@@ -116,7 +135,7 @@ index c67cb4539..a0da548bf 100644
  }  // namespace util
  }  // namespace arrow
 diff --git a/cpp/src/arrow/util/compression.h b/cpp/src/arrow/util/compression.h
-index 0832e82a6..b8767186b 100644
+index f0d359d19..bcf8df4ec 100644
 --- a/cpp/src/arrow/util/compression.h
 +++ b/cpp/src/arrow/util/compression.h
 @@ -18,8 +18,10 @@
@@ -146,10 +165,10 @@ index 0832e82a6..b8767186b 100644
  }  // namespace util
  }  // namespace arrow
 diff --git a/cpp/src/arrow/util/type_fwd.h b/cpp/src/arrow/util/type_fwd.h
-index ca107c2c6..d8f00c140 100644
+index 76e685ffa..ffa37cdeb 100644
 --- a/cpp/src/arrow/util/type_fwd.h
 +++ b/cpp/src/arrow/util/type_fwd.h
-@@ -49,7 +49,8 @@ struct Compression {
+@@ -50,7 +50,8 @@ struct Compression {
      LZ4_FRAME,
      LZO,
      BZ2,
@@ -160,7 +179,7 @@ index ca107c2c6..d8f00c140 100644
  };
  
 diff --git a/cpp/src/generated/Message_generated.h b/cpp/src/generated/Message_generated.h
-index 1c51c6eaf..5308808c9 100644
+index d0c71e042..a5c70ad52 100644
 --- a/cpp/src/generated/Message_generated.h
 +++ b/cpp/src/generated/Message_generated.h
 @@ -32,29 +32,32 @@ struct MessageBuilder;
@@ -218,5 +237,5 @@ index 170ea8fbc..98a7653d6 100644
  
  /// Provided for forward compatibility in case we need to support different
 -- 
-2.25.1
+2.34.1
 

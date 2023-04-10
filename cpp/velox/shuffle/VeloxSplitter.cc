@@ -146,10 +146,10 @@ arrow::Status VeloxSplitter::Init() {
       (strcmp(async_compression_enabled, "TRUE") == 0 || strcmp(async_compression_enabled, "true") == 0)) {
     options_.async_compress = true;
   }
-  if (options_.async_compress) {
+  if (options_.async_compress && !compression_thread_pool_) {
     auto maybe_pool = arrow::internal::ThreadPool::Make(options_.compression_thread_pool_size);
     if (!maybe_pool.ok()) {
-      maybe_pool.status().Warn("Failed to create compression thread pool");
+      std::cout << "Failed to create compression thread pool" << std::endl;
       options_.async_compress = false;
     } else {
       std::cout << "Created compression thread pool with size " << options_.compression_thread_pool_size << std::endl;
@@ -352,15 +352,11 @@ arrow::Status VeloxSplitter::DoSplit(const velox::RowVector& rv) {
             ARROW_ASSIGN_OR_RAISE(auto batch, CreateRecordBatch(pid, /*reset_buffers = */ false));
             RETURN_NOT_OK(compression_thread_pool_->Spawn([=]() {
               // TODO: Handle not ok in thread.
-              std::cout << " In async thread" << std::endl;
               if (batch != nullptr) {
                 auto status = CacheRecordBatchPayload(pid, *batch);
               }
               // spill immediately
               auto status = SpillPartition(pid);
-#ifdef GLUTEN_PRINT_DEBUG
-              std::cout << "pid " << pid << " done compression." << std::endl;
-#endif
             }));
             RETURN_NOT_OK(AllocatePartitionBuffers(pid, new_size));
           } else {
