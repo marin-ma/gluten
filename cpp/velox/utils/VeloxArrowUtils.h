@@ -100,8 +100,6 @@ namespace {
 
 class LargeMemoryPool : public arrow::MemoryPool {
  public:
-  constexpr static uint64_t huge_page_size = 1 << 21;
-
   explicit LargeMemoryPool() : capacity_(std::numeric_limits<int64_t>::max()) {}
   explicit LargeMemoryPool(int64_t capacity) : capacity_(capacity) {}
 
@@ -116,9 +114,9 @@ class LargeMemoryPool : public arrow::MemoryPool {
       return pool_->Allocate(0, alignment, out);
     }
     // make sure the size is cache line size aligned
-    size = ROUND_TO_LINE(size, alignment);
-    uint64_t alloc_size = size > LARGE_BUFFER_SIZE ? size : LARGE_BUFFER_SIZE;
-    alloc_size = ROUND_TO_LINE(alloc_size, huge_page_size);
+    uint64_t alloc_size = ROUND_TO_LINE(size, alignment);
+//    uint64_t alloc_size = size > LARGE_BUFFER_SIZE ? size : LARGE_BUFFER_SIZE;
+//    alloc_size = ROUND_TO_LINE(alloc_size, kHugePageSize);
     // std::cout << " allocated " << size << std::endl;
     auto its = std::find_if(buffers_.begin(), buffers_.end(), [size](BufferAllocated& buf) {
       return buf.allocated + size <= buf.alloc_size;
@@ -150,7 +148,6 @@ class LargeMemoryPool : public arrow::MemoryPool {
 
     *out = lastalloc.start_addr + lastalloc.allocated;
     lastalloc.allocated += size;
-    stats_.UpdateAllocatedBytes(size);
     return arrow::Status::OK();
   }
 
@@ -166,7 +163,6 @@ class LargeMemoryPool : public arrow::MemoryPool {
     });
     ARROW_CHECK_NE(its, buffers_.end());
     Free0(its, size);
-    stats_.UpdateAllocatedBytes(-size);
   }
 
   arrow::Status Reallocate(int64_t oldSize, int64_t newSize, int64_t alignment, uint8_t** ptr) override {
@@ -230,17 +226,18 @@ class LargeMemoryPool : public arrow::MemoryPool {
   MemoryPool* pool_ = arrow::default_memory_pool();
   std::function<arrow::Status(int64_t, int64_t*)> f_spill_ = nullptr;
   uint64_t capacity_;
-  arrow::internal::MemoryPoolStats stats_;
 };
 
 class LargePageMemoryPool : public LargeMemoryPool {
  public:
+  constexpr static uint64_t kHugePageSize = 1 << 21;
+
   explicit LargePageMemoryPool() : LargeMemoryPool() {}
   explicit LargePageMemoryPool(int64_t capacity) : LargeMemoryPool(capacity) {}
 
  protected:
   virtual arrow::Status do_alloc(int64_t size, uint8_t** out) {
-    int rst = posix_memalign((void**)out, 1 << 21, size);
+    int rst = posix_memalign((void**)out, kHugePageSize, size);
     madvise(*out, size, MADV_HUGEPAGE);
     madvise(*out, size, MADV_WILLNEED);
     if (rst != 0 || *out == nullptr) {
