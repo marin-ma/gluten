@@ -64,81 +64,6 @@ namespace gluten {
 const int kBatchBufferSize = 4096;
 const int kSplitBufferSize = 4096;
 
-// #define ENABLELARGEPAGE
-
-class LargePageMemoryPool : public arrow::MemoryPool {
- public:
-  explicit LargePageMemoryPool() {}
-
-  ~LargePageMemoryPool() override = default;
-
-  Status Allocate(int64_t size, int64_t alignment, uint8_t** out) override {
-#ifdef ENABLELARGEPAGE
-    if (size < 2 * 1024 * 1024) {
-      return pool_->Allocate(size, out);
-    } else {
-      Status st = pool_->AlignAllocate(size, out, ALIGNMENT);
-      madvise(*out, size, /*MADV_HUGEPAGE */ 14);
-      //std::cout << "Allocate: size = " << size << " addr = "  \
-          << std::hex << (uint64_t)*out  << " end = " << std::hex << (uint64_t)(*out+size) << std::dec << std::endl;
-      return st;
-    }
-#else
-    return pool_->Allocate(size, out);
-#endif
-  }
-
-  Status Reallocate(int64_t oldSize, int64_t newSize, int64_t alignment, uint8_t** ptr) override {
-    return pool_->Reallocate(oldSize, newSize, ptr);
-#ifdef ENABLELARGEPAGE
-    if (new_size < 2 * 1024 * 1024) {
-      return pool_->Reallocate(old_size, new_size, ptr);
-    } else {
-      Status st = pool_->AlignReallocate(old_size, new_size, ptr, ALIGNMENT);
-      madvise(*ptr, new_size, /*MADV_HUGEPAGE */ 14);
-      return st;
-    }
-#else
-    return pool_->Reallocate(oldSize, newSize, ptr);
-#endif
-  }
-
-  void Free(uint8_t* buffer, int64_t size, int64_t alignment) override {
-#ifdef ENABLELARGEPAGE
-    if (size < 2 * 1024 * 1024) {
-      pool_->Free(buffer, size);
-    } else {
-      pool_->Free(buffer, size, ALIGNMENT);
-    }
-#else
-    pool_->Free(buffer, size);
-#endif
-  }
-
-  int64_t bytes_allocated() const override {
-    return pool_->bytes_allocated();
-  }
-
-  int64_t max_memory() const override {
-    return pool_->max_memory();
-  }
-
-  std::string backend_name() const override {
-    return "LargePageMemoryPool";
-  }
-
-  int64_t total_bytes_allocated() const {
-    return pool_->total_bytes_allocated();
-  }
-
-  int64_t num_allocations() const {
-    return pool_->num_allocations();
-  }
-
- private:
-  MemoryPool* pool_ = arrow::default_memory_pool();
-};
-
 class BenchmarkShuffleSplit {
  public:
   BenchmarkShuffleSplit(std::string fileName) {
@@ -182,6 +107,7 @@ class BenchmarkShuffleSplit {
     bool preferEvict = state.range(2);
 
     std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<LargePageMemoryPool>();
+//    std::shared_ptr<arrow::MemoryPool> pool = getDefaultArrowMemoryPool();
 
     const int numPartitions = state.range(0);
 
@@ -337,6 +263,7 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
     if (state.thread_index() == 0)
       std::cout << localSchema->ToString() << std::endl;
 
+    auto* pool = options.memory_pool.get();
     GLUTEN_ASSIGN_OR_THROW(shuffleWriter, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator, options));
 
     std::shared_ptr<arrow::RecordBatch> recordBatch;
@@ -344,7 +271,7 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
     std::unique_ptr<::parquet::arrow::FileReader> parquetReader;
     std::shared_ptr<RecordBatchReader> recordBatchReader;
     GLUTEN_THROW_NOT_OK(::parquet::arrow::FileReader::Make(
-        arrow::default_memory_pool(), ::parquet::ParquetFileReader::Open(file_), properties_, &parquetReader));
+        pool, ::parquet::ParquetFileReader::Open(file_), properties_, &parquetReader));
 
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
     GLUTEN_THROW_NOT_OK(parquetReader->GetRecordBatchReader(rowGroupIndices_, localColumnIndices, &recordBatchReader));
@@ -395,6 +322,7 @@ class BenchmarkShuffleSplitIterateScanBenchmark : public BenchmarkShuffleSplit {
     if (state.thread_index() == 0)
       std::cout << schema_->ToString() << std::endl;
 
+    auto* pool = options.memory_pool.get();
     GLUTEN_ASSIGN_OR_THROW(
         shuffleWriter,
         VeloxShuffleWriter::create(numPartitions, std::move(partitionWriterCreator), std::move(options)));
@@ -404,7 +332,7 @@ class BenchmarkShuffleSplitIterateScanBenchmark : public BenchmarkShuffleSplit {
     std::unique_ptr<::parquet::arrow::FileReader> parquetReader;
     std::shared_ptr<RecordBatchReader> recordBatchReader;
     GLUTEN_THROW_NOT_OK(::parquet::arrow::FileReader::Make(
-        arrow::default_memory_pool(), ::parquet::ParquetFileReader::Open(file_), properties_, &parquetReader));
+        pool, ::parquet::ParquetFileReader::Open(file_), properties_, &parquetReader));
 
     for (auto _ : state) {
       std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
