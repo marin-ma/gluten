@@ -119,11 +119,11 @@ class MyMemoryPool final : public arrow::MemoryPool {
 
 // #define ENABLELARGEPAGE
 
-class LargePageMemoryPool final : public arrow::MemoryPool {
+class LargePageMemoryPool0 final : public arrow::MemoryPool {
  public:
-  explicit LargePageMemoryPool() {}
+  explicit LargePageMemoryPool0() {}
 
-  ~LargePageMemoryPool() override = default;
+  ~LargePageMemoryPool0() override = default;
 
   Status Allocate(int64_t size, int64_t alignment, uint8_t** out) override {
 #ifdef ENABLELARGEPAGE
@@ -259,7 +259,7 @@ class BenchmarkCompression {
       default:
         throw GlutenException("Codec not supported. Only support LZ4 or QATGzip");
     }
-    std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<LargePageMemoryPool>();
+    std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>();
     ipcWriteOptions.memory_pool = pool.get();
 
     int64_t elapseRead = 0;
