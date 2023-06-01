@@ -100,6 +100,8 @@ namespace {
 
 class LargeMemoryPool : public arrow::MemoryPool {
  public:
+  constexpr static uint64_t kHugePageSize = 1 << 21;
+
   explicit LargeMemoryPool() : capacity_(std::numeric_limits<int64_t>::max()) {}
   explicit LargeMemoryPool(int64_t capacity) : capacity_(capacity) {}
 
@@ -114,9 +116,9 @@ class LargeMemoryPool : public arrow::MemoryPool {
       return pool_->Allocate(0, alignment, out);
     }
     // make sure the size is cache line size aligned
-    uint64_t alloc_size = ROUND_TO_LINE(size, alignment);
-//    uint64_t alloc_size = size > LARGE_BUFFER_SIZE ? size : LARGE_BUFFER_SIZE;
-//    alloc_size = ROUND_TO_LINE(alloc_size, kHugePageSize);
+    size = ROUND_TO_LINE(size, alignment);
+    uint64_t alloc_size = size > LARGE_BUFFER_SIZE ? size : LARGE_BUFFER_SIZE;
+    alloc_size = ROUND_TO_LINE(alloc_size, kHugePageSize);
     // std::cout << " allocated " << size << std::endl;
     auto its = std::find_if(buffers_.begin(), buffers_.end(), [size](BufferAllocated& buf) {
       return buf.allocated + size <= buf.alloc_size;
@@ -230,8 +232,6 @@ class LargeMemoryPool : public arrow::MemoryPool {
 
 class LargePageMemoryPool : public LargeMemoryPool {
  public:
-  constexpr static uint64_t kHugePageSize = 1 << 21;
-
   explicit LargePageMemoryPool() : LargeMemoryPool() {}
   explicit LargePageMemoryPool(int64_t capacity) : LargeMemoryPool(capacity) {}
 
