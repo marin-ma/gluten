@@ -18,6 +18,8 @@
 #include "ArrowMemoryPool.h"
 #include "utils/exception.h"
 
+#include <sys/mman.h>
+
 namespace gluten {
 
 std::shared_ptr<arrow::MemoryPool> asWrappedArrowMemoryPool(MemoryAllocator* allocator) {
@@ -33,6 +35,7 @@ arrow::Status WrappedArrowMemoryPool::Allocate(int64_t size, int64_t alignment, 
   if (!allocator_->allocateAligned(alignment, size, reinterpret_cast<void**>(out))) {
     return arrow::Status::Invalid("WrappedMemoryPool: Error allocating " + std::to_string(size) + " bytes");
   }
+  madvise(*out, size, MADV_WILLNEED);
   return arrow::Status::OK();
 }
 
@@ -40,6 +43,7 @@ arrow::Status WrappedArrowMemoryPool::Reallocate(int64_t oldSize, int64_t newSiz
   if (!allocator_->reallocateAligned(*ptr, alignment, oldSize, newSize, reinterpret_cast<void**>(ptr))) {
     return arrow::Status::Invalid("WrappedMemoryPool: Error reallocating " + std::to_string(newSize) + " bytes");
   }
+  madvise(*ptr, newSize, MADV_WILLNEED);
   return arrow::Status::OK();
 }
 
