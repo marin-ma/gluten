@@ -117,25 +117,26 @@ class LargeMemoryPool : public arrow::MemoryPool {
     }
     // make sure the size is cache line size aligned
     size = ROUND_TO_LINE(size, alignment);
-    uint64_t alloc_size = size > LARGE_BUFFER_SIZE ? size : LARGE_BUFFER_SIZE;
-    alloc_size = ROUND_TO_LINE(alloc_size, kHugePageSize);
     // std::cout << " allocated " << size << std::endl;
     auto its = std::find_if(buffers_.begin(), buffers_.end(), [size](BufferAllocated& buf) {
       return buf.allocated + size <= buf.alloc_size;
     });
 
     if (its == buffers_.end()) {
+      uint64_t alloc_size = size > LARGE_BUFFER_SIZE ? size : LARGE_BUFFER_SIZE;
+      alloc_size = ROUND_TO_LINE(alloc_size, kHugePageSize);
+
       uint8_t* alloc_addr;
       auto total_alloc1 = bytes_allocated();
-      auto total_alloc2 = 0;
-      if (total_alloc1 > capacity_ - alloc_size) {
-        if (f_spill_) {
-          int64_t act_free = 0;
-          RETURN_NOT_OK(f_spill_(size, &act_free));
-        }
-        total_alloc2 = bytes_allocated();
-        if (total_alloc2 > capacity_ - alloc_size)
-          return arrow::Status::OutOfMemory("malloc of size ", size, " failed");
+      if (alloc_size > capacity_ - total_alloc1) {
+        //        if (f_spill_) {
+        //          int64_t act_free = 0;
+        //          RETURN_NOT_OK(f_spill_(size, &act_free));
+        //        }
+        //        auto total_alloc2 = 0;
+        //        total_alloc2 = bytes_allocated();
+        //        if (total_alloc2 > capacity_ - alloc_size)
+        return arrow::Status::OutOfMemory("malloc of size ", size, " failed");
       }
 
       RETURN_NOT_OK(do_alloc(alloc_size, &alloc_addr));
@@ -164,16 +165,25 @@ class LargeMemoryPool : public arrow::MemoryPool {
       return buffer >= buf.start_addr && buffer < buf.start_addr + buf.alloc_size;
     });
     ARROW_CHECK_NE(its, buffers_.end());
-    Free0(its, size);
+    its->freed += size;
+    if (its->freed /*> (LARGE_BUFFER_SIZE >> 1)*/ && its->freed == its->allocated) {
+      do_free(its->start_addr, its->alloc_size);
+      buffers_.erase(its);
+      // std::cout << "free " << std::hex << (uint64_t)to_free.start_addr << std::dec
+      //           << " buffer size = " << buffers_.size() << std::endl;
+    }
   }
 
   arrow::Status Reallocate(int64_t oldSize, int64_t newSize, int64_t alignment, uint8_t** ptr) override {
-    //    // No shrink-to-fit
-    //    if (newSize <= oldSize) {
-    //      return arrow::Status::OK();
-    //    }
-    Free(*ptr, oldSize, alignment);
-    return Allocate(newSize, alignment, ptr);
+    // No shrink-to-fit
+    // if (newSize <= oldSize) {
+    //  return arrow::Status::OK();
+    // }
+    auto* oldPtr = *ptr;
+    RETURN_NOT_OK(Allocate(newSize, alignment, ptr));
+    memcpy(*ptr, oldPtr, std::min(oldSize, newSize));
+    Free(oldPtr, oldSize, alignment);
+    return arrow::Status::OK();
   }
 
   int64_t bytes_allocated() const override {
@@ -213,17 +223,6 @@ class LargeMemoryPool : public arrow::MemoryPool {
     uint64_t alloc_size;
   };
 
-  void Free0(std::vector<BufferAllocated>::iterator to_free, int64_t size) {
-    // print_trace();
-    to_free->freed += size;
-    if (to_free->freed /*> (LARGE_BUFFER_SIZE >> 1)*/ && to_free->freed == to_free->allocated) {
-      do_free(to_free->start_addr, to_free->alloc_size);
-      buffers_.erase(to_free);
-      // std::cout << "free " << std::hex << (uint64_t)to_free.start_addr << std::dec
-      //           << " buffer size = " << buffers_.size() << std::endl;
-    }
-  }
-
   std::vector<BufferAllocated> buffers_;
   MemoryPool* pool_ = arrow::default_memory_pool();
   std::function<arrow::Status(int64_t, int64_t*)> f_spill_ = nullptr;
@@ -236,7 +235,7 @@ class LargePageMemoryPool : public LargeMemoryPool {
   explicit LargePageMemoryPool(int64_t capacity) : LargeMemoryPool(capacity) {}
 
  protected:
-  virtual arrow::Status do_alloc(int64_t size, uint8_t** out) {
+  arrow::Status do_alloc(int64_t size, uint8_t** out) override {
     int rst = posix_memalign((void**)out, kHugePageSize, size);
     madvise(*out, size, MADV_HUGEPAGE);
     madvise(*out, size, MADV_WILLNEED);
@@ -246,7 +245,7 @@ class LargePageMemoryPool : public LargeMemoryPool {
       return arrow::Status::OK();
     }
   }
-  virtual void do_free(uint8_t* buffer, int64_t size) {
+  void do_free(uint8_t* buffer, int64_t size) override {
     std::free((void*)(buffer));
   }
 };
@@ -257,7 +256,7 @@ class MMapMemoryPool : public LargeMemoryPool {
   explicit MMapMemoryPool(int64_t capacity) : LargeMemoryPool(capacity) {}
 
  protected:
-  virtual arrow::Status do_alloc(int64_t size, uint8_t** out) {
+  arrow::Status do_alloc(int64_t size, uint8_t** out) override {
     *out = static_cast<uint8_t*>(mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
     if (*out == MAP_FAILED) {
       std::cout << "stack: " << boost::stacktrace::stacktrace() << std::endl;
@@ -268,7 +267,8 @@ class MMapMemoryPool : public LargeMemoryPool {
       return arrow::Status::OK();
     }
   }
-  virtual void do_free(uint8_t* buffer, int64_t size) {
+
+  void do_free(uint8_t* buffer, int64_t size) override {
     munmap((void*)(buffer), size);
   }
 };
