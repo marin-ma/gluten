@@ -7,6 +7,7 @@
 #include "utils/macros.h"
 
 #include "arrow/c/bridge.h"
+#include "utils/VeloxArrowUtils.h"
 
 #if defined(__x86_64__)
 #include <immintrin.h>
@@ -137,7 +138,8 @@ arrow::Status VeloxShuffleWriter::init() {
 
 arrow::Status VeloxShuffleWriter::initIpcWriteOptions() {
   auto& ipcWriteOptions = options_.ipc_write_options;
-  ipcWriteOptions.memory_pool = options_.memory_pool.get();
+  options_.ipc_memory_pool = std::make_shared<MMapMemoryPool>();
+  ipcWriteOptions.memory_pool = options_.ipc_memory_pool.get();
   ipcWriteOptions.use_threads = false;
 
   tinyBatchWriteOptions_ = ipcWriteOptions;
@@ -196,7 +198,7 @@ arrow::Status VeloxShuffleWriter::split(ColumnarBatch* cb) {
     std::shared_ptr<arrow::RecordBatch> batchPtr = result.ValueOrDie();
 
     // 2. call CacheRecordBatch with RecordBatch
-    RETURN_NOT_OK(cacheRecordBatch(0, *batchPtr));
+    RETURN_NOT_OK(cacheRecordBatch(0, *batchPtr, false));
   } else {
     auto& rv = *veloxColumnBatch->getFlattenedRowVector();
     RETURN_NOT_OK(initFromRowVector(rv));
@@ -273,33 +275,30 @@ arrow::Status VeloxShuffleWriter::doSplit(const velox::RowVector& rv) {
       if (partition2BufferSize_[pid] == 0) {
         // allocate buffer if it's not yet allocated
         auto newSize = std::max(calculatePartitionBufferSize(rv), partition2RowCount_[pid]);
-        RETURN_NOT_OK(allocatePartitionBuffers(pid, newSize));
+        RETURN_NOT_OK(allocatePartitionBuffersWithRetry(pid, newSize));
       } else if (partitionBufferIdxBase_[pid] + partition2RowCount_[pid] > partition2BufferSize_[pid]) {
         auto newSize = std::max(calculatePartitionBufferSize(rv), partition2RowCount_[pid]);
-        // if the size to be filled + allready filled > the buffer size, need to allocate new buffer
-        if (options_.prefer_evict) {
-          // if prefer_evict is set, evict current RowVector, we may reuse the buffers
-          if (newSize > partition2BufferSize_[pid]) {
-            // if the partition size after split is already larger than
-            // allocated buffer size, need reallocate
-            RETURN_NOT_OK(createRecordBatchFromBuffer(pid, /*reset_buffers = */ true));
-            // partitionEvictor[pid]->doEvict();
-
-            // splill immediately
-            RETURN_NOT_OK(evictPartition(pid));
-            RETURN_NOT_OK(allocatePartitionBuffers(pid, newSize));
-          } else {
-            // partition size after split is smaller than buffer size, no need
-            // to reset buffer, reuse it.
-            RETURN_NOT_OK(createRecordBatchFromBuffer(pid, /*reset_buffers = */ false));
-            // partitionEvictor[pid]->doEvict();
+        // if the size to be filled + allready filled > the buffer size, need to free current buffers and allocate new
+        // buffer
+        if (newSize > partition2BufferSize_[pid]) {
+          // if the partition size after split is already larger than
+          // allocated buffer size, need reallocate
+          RETURN_NOT_OK(createRecordBatchFromBuffer(pid, /*resetBuffers = */ true));
+          // partitionEvictor[pid]->doEvict();
+          if (options_.prefer_evict) {
+            // if prefer_evict is set, evict current RowVector
             RETURN_NOT_OK(evictPartition(pid));
           }
+          RETURN_NOT_OK(allocatePartitionBuffersWithRetry(pid, newSize));
         } else {
-          // if prefer_evict is disabled, cache the record batch
-          RETURN_NOT_OK(createRecordBatchFromBuffer(pid, /*reset_buffers = */ true));
-          // allocate partition buffer with retries
-          RETURN_NOT_OK(allocateNew(pid, newSize));
+          // partition size after split is smaller than buffer size.
+          // reuse the buffers.
+          RETURN_NOT_OK(createRecordBatchFromBuffer(pid, /*resetBuffers = */ false));
+          // partitionEvictor[pid]->doEvict();
+          if (options_.prefer_evict) {
+            // if prefer_evict is set, evict current RowVector
+            RETURN_NOT_OK(evictPartition(pid));
+          }
         }
       }
     }
@@ -1000,7 +999,7 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
     return arrow::Status::OK();
   }
 
-  arrow::Status VeloxShuffleWriter::allocateNew(uint32_t partitionId, uint32_t newSize) {
+  arrow::Status VeloxShuffleWriter::allocatePartitionBuffersWithRetry(uint32_t partitionId, uint32_t newSize) {
     auto retry = 0;
     auto status = allocatePartitionBuffers(partitionId, newSize);
     while (status.IsOutOfMemory() && retry < 3) {
@@ -1143,7 +1142,7 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
       }
     }
     auto rb = arrow::RecordBatch::Make(schema_, numRows, std::move(arrays));
-    return cacheRecordBatch(partitionId, *rb);
+    return cacheRecordBatch(partitionId, *rb, !resetBuffers);
   }
 
   namespace {
@@ -1167,17 +1166,34 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
 
   } // namespace
 
-  arrow::Status VeloxShuffleWriter::cacheRecordBatch(uint32_t partitionId, const arrow::RecordBatch& rb) {
+  arrow::Status VeloxShuffleWriter::cacheRecordBatch(
+      uint32_t partitionId, const arrow::RecordBatch& rb, bool reuseBuffers) {
     int64_t rawSize = getBatchNbytes(rb);
     rawPartitionLengths_[partitionId] += rawSize;
     auto payload = std::make_shared<arrow::ipc::IpcPayload>();
 #ifndef SKIPCOMPRESS
-    if (rb.num_rows() <= (uint32_t)options_.batch_compress_threshold) {
+    auto isTinyBatch = rb.num_rows() <= options_.batch_compress_threshold;
+    if (isTinyBatch) {
       TIME_NANO_OR_RAISE(
           totalCompressTime_, arrow::ipc::GetRecordBatchPayload(rb, tinyBatchWriteOptions_, payload.get()));
     } else {
       TIME_NANO_OR_RAISE(
           totalCompressTime_, arrow::ipc::GetRecordBatchPayload(rb, options_.ipc_write_options, payload.get()));
+    }
+    if (reuseBuffers && (isTinyBatch || options_.ipc_write_options.codec == nullptr)) {
+      // Without compression, we need to perform a manual copy of the original buffers
+      // so that we can reuse them for next split.
+      for (auto i = 0; i < payload->body_buffers.size(); ++i) {
+        auto& buffer = payload->body_buffers[i];
+        if (buffer != nullptr) {
+          auto memoryPool = options_.ipc_write_options.memory_pool;
+          ARROW_ASSIGN_OR_RAISE(auto copy, ::arrow::AllocateResizableBuffer(buffer->size(), memoryPool));
+          if (buffer->size() > 0) {
+            memcpy(copy->mutable_data(), buffer->data(), static_cast<size_t>(buffer->size()));
+          }
+          buffer = std::move(copy);
+        }
+      }
     }
 #else
   // for test reason

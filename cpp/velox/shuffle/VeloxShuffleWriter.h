@@ -198,9 +198,9 @@ class VeloxShuffleWriter final : public ShuffleWriter {
 
   arrow::Status allocateBufferFromPool(std::shared_ptr<arrow::Buffer>& buffer, uint32_t size);
 
-  arrow::Status allocateNew(uint32_t partitionId, uint32_t newSize);
+  arrow::Status allocatePartitionBuffersWithRetry(uint32_t partitionId, uint32_t newSize);
 
-  arrow::Status cacheRecordBatch(uint32_t partitionId, const arrow::RecordBatch& rb);
+  arrow::Status cacheRecordBatch(uint32_t partitionId, const arrow::RecordBatch& rb, bool reuseBuffers);
 
   arrow::Status splitFixedWidthValueBuffer(const facebook::velox::RowVector& rv);
 
