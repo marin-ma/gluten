@@ -249,8 +249,7 @@ arrow::Status PreferCachePartitionWriter::init() {
 
 arrow::Status PreferCachePartitionWriter::evictPartition(int32_t partitionId /* not used */) {
   if (inStop_) {
-    // TODO: Return OOM?
-    return arrow::Status::OK();
+    return arrow::Status::OutOfMemory("Cannot evict partition ", partitionId, " because writer is stopped.");
   }
   // TODO: Remove this check.
   if (partitionId != -1) {

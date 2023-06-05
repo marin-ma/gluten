@@ -106,8 +106,7 @@ class BenchmarkShuffleSplit {
     arrow::Compression::type compressionType = (arrow::Compression::type)state.range(1);
     bool preferEvict = state.range(2);
 
-    std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<LargePageMemoryPool>();
-//    std::shared_ptr<arrow::MemoryPool> pool = getDefaultArrowMemoryPool();
+    std::shared_ptr<arrow::MemoryPool> pool = getDefaultArrowMemoryPool();
 
     const int numPartitions = state.range(0);
 
@@ -265,6 +264,10 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
 
     auto* pool = options.memory_pool.get();
     GLUTEN_ASSIGN_OR_THROW(shuffleWriter, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator, options));
+    auto ipcMemoryPool = std::make_shared<MMapMemoryPool>();
+    ipcMemoryPool->SetSpillFunc(
+        [shuffleWriter](int64_t size, int64_t* actual) { return shuffleWriter->evictFixedSize(size, actual); });
+    options.ipc_write_options.memory_pool = ipcMemoryPool.get();
 
     std::shared_ptr<arrow::RecordBatch> recordBatch;
 
@@ -323,6 +326,11 @@ class BenchmarkShuffleSplitIterateScanBenchmark : public BenchmarkShuffleSplit {
       std::cout << schema_->ToString() << std::endl;
 
     auto* pool = options.memory_pool.get();
+    auto ipcMemoryPool = std::make_shared<MMapMemoryPool>();
+    auto* shuffleWriterPtr = shuffleWriter.get();
+    ipcMemoryPool->SetSpillFunc(
+        [shuffleWriterPtr](int64_t size, int64_t* actual) { return shuffleWriterPtr->evictFixedSize(size, actual); });
+    options.ipc_write_options.memory_pool = ipcMemoryPool.get();
     GLUTEN_ASSIGN_OR_THROW(
         shuffleWriter,
         VeloxShuffleWriter::create(numPartitions, std::move(partitionWriterCreator), std::move(options)));
