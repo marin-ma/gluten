@@ -216,20 +216,33 @@ class LargeMemoryPool : public arrow::MemoryPool {
     const char* memoryEnv = std::getenv("MEMORYPOOL_CAPACITY");
     if (memoryEnv != nullptr) {
       std::string memory = memoryEnv;
-      if (memory.back() == 'G' || memory.back() == 'g') {
-        memory.pop_back(); // remove the G or g suffix
-        try {
-          return std::stoul(memory) << 30;
-        } catch (const std::invalid_argument& e) {
-          std::cerr << "Invalid memory format: " << memoryEnv << std::endl;
-        } catch (const std::out_of_range& e) {
-          std::cerr << "Memory value out of range: " << memoryEnv << std::endl;
-        }
-      } else {
-        std::cerr << "Memory value should have a G or g suffix: " << memoryEnv << std::endl;
+      uint64_t shift = 0;
+
+      switch (memory.back()) {
+        case 'G':
+        case 'g':
+          shift = 30;
+          memory.pop_back();
+          break;
+        case 'M':
+        case 'm':
+          shift = 20;
+          memory.pop_back();
+          break;
+        default:
+          std::cerr << "Memory value should have a G, g, M or m suffix: " << memoryEnv << std::endl;
+          return std::numeric_limits<uint64_t>::max();
+      }
+
+      try {
+        return std::stoul(memory) << shift;
+      } catch (const std::invalid_argument& e) {
+        std::cerr << "Invalid memory format: " << memoryEnv << std::endl;
+      } catch (const std::out_of_range& e) {
+        std::cerr << "Memory value out of range: " << memoryEnv << std::endl;
       }
     }
-    return std::numeric_limits<int64_t>::max();
+    return std::numeric_limits<uint64_t>::max();
   }
 
   virtual arrow::Status do_alloc(int64_t size, uint8_t** out) {
