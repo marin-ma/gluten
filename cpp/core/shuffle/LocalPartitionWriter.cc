@@ -248,6 +248,7 @@ arrow::Status PreferCachePartitionWriter::init() {
 }
 
 arrow::Status PreferCachePartitionWriter::evictPartition(int32_t partitionId /* not used */) {
+  std::lock_guard<std::mutex> lock(mtx_);
   // TODO: Remove this check.
   if (partitionId != -1) {
     return arrow::Status::Invalid("Cannot spill single partition. Invalid code path.");
@@ -285,6 +286,7 @@ arrow::Status PreferCachePartitionWriter::evictPartition(int32_t partitionId /* 
 }
 
 arrow::Status PreferCachePartitionWriter::stop() {
+  std::lock_guard<std::mutex> lock(mtx_);
   int64_t totalWriteTime = 0;
   int64_t totalBytesEvicted = 0;
   int64_t totalBytesWritten = 0;
