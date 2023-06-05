@@ -138,7 +138,9 @@ arrow::Status VeloxShuffleWriter::init() {
 
 arrow::Status VeloxShuffleWriter::initIpcWriteOptions() {
   auto& ipcWriteOptions = options_.ipc_write_options;
-  options_.ipc_memory_pool = std::make_shared<MMapMemoryPool>();
+  auto ipcMemoryPool = std::make_shared<MMapMemoryPool>();
+  ipcMemoryPool->SetSpillFunc([this](int64_t size, int64_t* actual) { return this->evictFixedSize(size, actual); });
+  options_.ipc_memory_pool = std::move(ipcMemoryPool);
   ipcWriteOptions.memory_pool = options_.ipc_memory_pool.get();
   ipcWriteOptions.use_threads = false;
 

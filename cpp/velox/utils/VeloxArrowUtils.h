@@ -102,7 +102,9 @@ class LargeMemoryPool : public arrow::MemoryPool {
  public:
   constexpr static uint64_t kHugePageSize = 1 << 21;
 
-  explicit LargeMemoryPool() : capacity_(std::numeric_limits<int64_t>::max()) {}
+  explicit LargeMemoryPool() {
+    capacity_ = parseMemoryEnv();
+  }
   explicit LargeMemoryPool(int64_t capacity) : capacity_(capacity) {}
 
   ~LargeMemoryPool() override = default;
@@ -129,14 +131,15 @@ class LargeMemoryPool : public arrow::MemoryPool {
       uint8_t* alloc_addr;
       auto total_alloc1 = bytes_allocated();
       if (alloc_size > capacity_ - total_alloc1) {
-        //        if (f_spill_) {
-        //          int64_t act_free = 0;
-        //          RETURN_NOT_OK(f_spill_(size, &act_free));
-        //        }
-        //        auto total_alloc2 = 0;
-        //        total_alloc2 = bytes_allocated();
-        //        if (total_alloc2 > capacity_ - alloc_size)
-        return arrow::Status::OutOfMemory("malloc of size ", size, " failed");
+        if (f_spill_) {
+          int64_t act_free = 0;
+          RETURN_NOT_OK(f_spill_(size, &act_free));
+        }
+        auto total_alloc2 = 0;
+        total_alloc2 = bytes_allocated();
+        if (alloc_size > capacity_ - total_alloc2) {
+          return arrow::Status::OutOfMemory("malloc of size ", size, " failed");
+        }
       }
 
       RETURN_NOT_OK(do_alloc(alloc_size, &alloc_addr));
@@ -209,6 +212,26 @@ class LargeMemoryPool : public arrow::MemoryPool {
   }
 
  protected:
+  uint64_t parseMemoryEnv() {
+    const char* memoryEnv = std::getenv("MEMORYPOOL_CAPACITY");
+    if (memoryEnv != nullptr) {
+      std::string memory = memoryEnv;
+      if (memory.back() == 'G' || memory.back() == 'g') {
+        memory.pop_back(); // remove the G or g suffix
+        try {
+          return std::stoul(memory) << 30;
+        } catch (const std::invalid_argument& e) {
+          std::cerr << "Invalid memory format: " << memoryEnv << std::endl;
+        } catch (const std::out_of_range& e) {
+          std::cerr << "Memory value out of range: " << memoryEnv << std::endl;
+        }
+      } else {
+        std::cerr << "Memory value should have a G or g suffix: " << memoryEnv << std::endl;
+      }
+    }
+    return std::numeric_limits<int64_t>::max();
+  }
+
   virtual arrow::Status do_alloc(int64_t size, uint8_t** out) {
     return pool_->Allocate(size, out);
   }
