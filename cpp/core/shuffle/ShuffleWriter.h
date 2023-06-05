@@ -36,11 +36,19 @@ class ShuffleWriter {
   // Cache the partition buffer/builder as compressed record batch. If reset
   // buffers, the partition buffer/builder will be set to nullptr. Two cases for
   // caching the partition buffers as record batch:
-  // 1. Split record batch. It first calculate whether the partition
+  // 1. Split record batch. It first calculates whether the partition
   // buffer can hold all data according to partition id. If not, call this
   // method and allocate new buffers. Spill will happen if OOM.
   // 2. Stop the shuffle writer. The record batch will be written to disk immediately.
   virtual arrow::Status createRecordBatchFromBuffer(uint32_t partitionId, bool resetBuffers) = 0;
+
+  virtual arrow::Result<std::shared_ptr<arrow::RecordBatch>> createArrowRecordBatchFromBuffer(
+      uint32_t partitionId,
+      bool resetBuffers) = 0;
+
+  virtual arrow::Result<std::shared_ptr<arrow::ipc::IpcPayload>> createArrowIpcPayload(
+      const arrow::RecordBatch& rb,
+      bool reuseBuffers) = 0;
 
   virtual arrow::Status stop() = 0;
 
@@ -102,6 +110,10 @@ class ShuffleWriter {
 
   void setPartitionLengths(int32_t index, int64_t length) {
     partitionLengths_[index] = length;
+  }
+
+  void setRawPartitionLength(int32_t index, int64_t length) {
+    rawPartitionLengths_[index] = length;
   }
 
   void setTotalWriteTime(int64_t totalWriteTime) {
