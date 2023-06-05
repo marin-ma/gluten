@@ -285,7 +285,11 @@ arrow::Status VeloxShuffleWriter::doSplit(const velox::RowVector& rv) {
         if (newSize > partition2BufferSize_[pid]) {
           // if the partition size after split is already larger than
           // allocated buffer size, need reallocate
-          RETURN_NOT_OK(createRecordBatchFromBuffer(pid, /*resetBuffers = */ true));
+          {
+            bool reuseBuffers = false;
+            ARROW_ASSIGN_OR_RAISE(auto rb, createArrowRecordBatchFromBuffer(pid, /*resetBuffers = */ !reuseBuffers));
+            RETURN_NOT_OK(cacheRecordBatch(pid, *rb, reuseBuffers));
+          }
           // partitionEvictor[pid]->doEvict();
           if (options_.prefer_evict) {
             // if prefer_evict is set, evict current RowVector
@@ -295,7 +299,11 @@ arrow::Status VeloxShuffleWriter::doSplit(const velox::RowVector& rv) {
         } else {
           // partition size after split is smaller than buffer size.
           // reuse the buffers.
-          RETURN_NOT_OK(createRecordBatchFromBuffer(pid, /*resetBuffers = */ false));
+          {
+            bool reuseBuffers = true;
+            ARROW_ASSIGN_OR_RAISE(auto rb, createArrowRecordBatchFromBuffer(pid, /*resetBuffers = */ !reuseBuffers));
+            RETURN_NOT_OK(cacheRecordBatch(pid, *rb, reuseBuffers));
+          }
           // partitionEvictor[pid]->doEvict();
           if (options_.prefer_evict) {
             // if prefer_evict is set, evict current RowVector
@@ -1030,17 +1038,59 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
     return status;
   }
 
-  arrow::Status VeloxShuffleWriter::createRecordBatchFromBuffer(uint32_t partitionId, bool resetBuffers) {
-    if (partitionBufferIdxBase_[partitionId] <= 0) {
-      return arrow::Status::OK();
+  arrow::Result<std::shared_ptr<arrow::ipc::IpcPayload>> VeloxShuffleWriter::createArrowIpcPayload(
+      const arrow::RecordBatch& rb, bool reuseBuffers) {
+    auto payload = std::make_shared<arrow::ipc::IpcPayload>();
+#ifndef SKIPCOMPRESS
+    auto isTinyBatch = rb.num_rows() <= options_.batch_compress_threshold;
+#else
+  auto isTinyBatch = true;
+#endif
+    if (isTinyBatch) {
+      TIME_NANO_OR_RAISE(
+          totalCompressTime_, arrow::ipc::GetRecordBatchPayload(rb, tinyBatchWriteOptions_, payload.get()));
+    } else {
+      TIME_NANO_OR_RAISE(
+          totalCompressTime_, arrow::ipc::GetRecordBatchPayload(rb, options_.ipc_write_options, payload.get()));
     }
+    if (reuseBuffers && (isTinyBatch || options_.ipc_write_options.codec == nullptr)) {
+      // Without compression, we need to perform a manual copy of the original buffers
+      // so that we can reuse them for next split.
+      for (auto i = 0; i < payload->body_buffers.size(); ++i) {
+        auto& buffer = payload->body_buffers[i];
+        if (buffer != nullptr) {
+          auto memoryPool = options_.ipc_write_options.memory_pool;
+          ARROW_ASSIGN_OR_RAISE(auto copy, ::arrow::AllocateResizableBuffer(buffer->size(), memoryPool));
+          if (buffer->size() > 0) {
+            memcpy(copy->mutable_data(), buffer->data(), static_cast<size_t>(buffer->size()));
+          }
+          buffer = std::move(copy);
+        }
+      }
+    }
+    return payload;
+  }
+
+  arrow::Status VeloxShuffleWriter::createRecordBatchFromBuffer(uint32_t partitionId, bool resetBuffers) {
+    ARROW_ASSIGN_OR_RAISE(auto rb, createArrowRecordBatchFromBuffer(partitionId, resetBuffers));
+    RETURN_NOT_OK(cacheRecordBatch(partitionId, *rb, false));
+    return arrow::Status::OK();
+  }
+
+  arrow::Result<std::shared_ptr<arrow::RecordBatch>> VeloxShuffleWriter::createArrowRecordBatchFromBuffer(
+      uint32_t partitionId, bool resetBuffers) {
+    if (partitionBufferIdxBase_[partitionId] <= 0) {
+      return arrow::RecordBatch::MakeEmpty(schema_, options_.memory_pool.get());
+    }
+
+    auto numRows = partitionBufferIdxBase_[partitionId];
+    // partitionBufferIdxBase_[partitionId] = 0;
 
     // already filled
     auto fixedWidthIdx = 0;
     auto binaryIdx = 0;
     auto listIdx = 0;
     auto numFields = schema_->num_fields();
-    auto numRows = partitionBufferIdxBase_[partitionId];
 
     std::vector<std::shared_ptr<arrow::Array>> arrays(numFields);
     for (int i = 0; i < numFields; ++i) {
@@ -1143,8 +1193,7 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
         }
       }
     }
-    auto rb = arrow::RecordBatch::Make(schema_, numRows, std::move(arrays));
-    return cacheRecordBatch(partitionId, *rb, !resetBuffers);
+    return arrow::RecordBatch::Make(schema_, numRows, std::move(arrays));
   }
 
   namespace {
@@ -1170,39 +1219,11 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
 
   arrow::Status VeloxShuffleWriter::cacheRecordBatch(
       uint32_t partitionId, const arrow::RecordBatch& rb, bool reuseBuffers) {
+    // TODO: check if can be replaced by payload->raw_body_length;
     int64_t rawSize = getBatchNbytes(rb);
     rawPartitionLengths_[partitionId] += rawSize;
-    auto payload = std::make_shared<arrow::ipc::IpcPayload>();
-#ifndef SKIPCOMPRESS
-    auto isTinyBatch = rb.num_rows() <= options_.batch_compress_threshold;
-    if (isTinyBatch) {
-      TIME_NANO_OR_RAISE(
-          totalCompressTime_, arrow::ipc::GetRecordBatchPayload(rb, tinyBatchWriteOptions_, payload.get()));
-    } else {
-      TIME_NANO_OR_RAISE(
-          totalCompressTime_, arrow::ipc::GetRecordBatchPayload(rb, options_.ipc_write_options, payload.get()));
-    }
-    if (reuseBuffers && (isTinyBatch || options_.ipc_write_options.codec == nullptr)) {
-      // Without compression, we need to perform a manual copy of the original buffers
-      // so that we can reuse them for next split.
-      for (auto i = 0; i < payload->body_buffers.size(); ++i) {
-        auto& buffer = payload->body_buffers[i];
-        if (buffer != nullptr) {
-          auto memoryPool = options_.ipc_write_options.memory_pool;
-          ARROW_ASSIGN_OR_RAISE(auto copy, ::arrow::AllocateResizableBuffer(buffer->size(), memoryPool));
-          if (buffer->size() > 0) {
-            memcpy(copy->mutable_data(), buffer->data(), static_cast<size_t>(buffer->size()));
-          }
-          buffer = std::move(copy);
-        }
-      }
-    }
-#else
-  // for test reason
-  TIME_NANO_OR_RAISE(
-      total_compress_time_, arrow::ipc::GetRecordBatchPayload(*rb, tiny_bach_write_options_, payload.get()));
-#endif
 
+    ARROW_ASSIGN_OR_RAISE(auto payload, createArrowIpcPayload(rb, reuseBuffers));
     partitionCachedRecordbatchSize_[partitionId] += payload->body_length;
     partitionCachedRecordbatch_[partitionId].push_back(std::move(payload));
     partitionBufferIdxBase_[partitionId] = 0;

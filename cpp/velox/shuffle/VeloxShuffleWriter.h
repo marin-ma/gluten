@@ -105,6 +105,14 @@ class VeloxShuffleWriter final : public ShuffleWriter {
 
   arrow::Status createRecordBatchFromBuffer(uint32_t partitionId, bool resetBuffers) override;
 
+  arrow::Result<std::shared_ptr<arrow::RecordBatch>> createArrowRecordBatchFromBuffer(
+      uint32_t partitionId,
+      bool resetBuffers) override;
+
+  arrow::Result<std::shared_ptr<arrow::ipc::IpcPayload>> createArrowIpcPayload(
+      const arrow::RecordBatch& rb,
+      bool reuseBuffers) override;
+
   int64_t rawPartitionBytes() const {
     return std::accumulate(rawPartitionLengths_.begin(), rawPartitionLengths_.end(), 0LL);
   }
