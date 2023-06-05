@@ -127,6 +127,7 @@ class PreferCachePartitionWriter : public LocalPartitionWriterBase {
   };
 
   std::vector<SpillInfo> spills_;
+  std::mutex mtx_;
 };
 
 class LocalPartitionWriterCreator : public ShuffleWriter::PartitionWriterCreator {
