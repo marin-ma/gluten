@@ -32,8 +32,8 @@ arrow::Result<std::shared_ptr<ColumnarBatch>> recordBatch2VeloxColumnarBatch(con
   return std::make_shared<VeloxColumnarBatch>(std::dynamic_pointer_cast<facebook::velox::RowVector>(vp));
 }
 
-uint64_t parseMemoryEnv() {
-  const char* memoryEnv = std::getenv("MEMORYPOOL_CAPACITY");
+uint64_t parseMemoryEnv(const std::string& envStr) {
+  const char* memoryEnv = std::getenv(envStr.c_str());
   if (memoryEnv != nullptr) {
     std::string memory = memoryEnv;
     uint64_t shift = 0;
