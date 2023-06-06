@@ -348,7 +348,7 @@ arrow::Status PreferCachePartitionWriter::stop() {
     }
     // 7. Write the last payload.
     ARROW_ASSIGN_OR_RAISE(auto rb, shuffleWriter_->createArrowRecordBatchFromBuffer(pid, true));
-    if (rb->num_rows() > 0) {
+    if (rb) {
       if (firstWrite) {
         // Write schema payload for this partition
         if (writeSchema) {

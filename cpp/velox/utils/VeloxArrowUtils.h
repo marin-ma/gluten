@@ -34,7 +34,7 @@ namespace gluten {
 
 arrow::Result<std::shared_ptr<ColumnarBatch>> recordBatch2VeloxColumnarBatch(const arrow::RecordBatch& rb);
 
-uint64_t parseMemoryEnv();
+uint64_t parseMemoryEnv(const std::string& envStr);
 
 /**
  * arrow::MemoryPool instance used by tests and benchmarks
@@ -105,7 +105,7 @@ class LargeMemoryPool : public arrow::MemoryPool {
   constexpr static uint64_t kHugePageSize = 1 << 21;
 
   explicit LargeMemoryPool() {
-    capacity_ = parseMemoryEnv();
+    capacity_ = parseMemoryEnv("MEMORYPOOL_CAPACITY");
   }
   explicit LargeMemoryPool(int64_t capacity) : capacity_(capacity) {}
 

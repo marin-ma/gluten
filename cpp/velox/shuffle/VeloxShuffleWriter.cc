@@ -142,7 +142,7 @@ arrow::Status VeloxShuffleWriter::initIpcWriteOptions() {
   //  ipcMemoryPool->SetSpillFunc([this](int64_t size, int64_t* actual) { return this->evictFixedSize(size, actual); });
   //  options_.ipc_memory_pool = std::move(ipcMemoryPool);
   ipcWriteOptions.memory_pool = options_.ipc_memory_pool.get();
-//  ipcWriteOptions.memory_pool = options_.memory_pool.get();
+  // ipcWriteOptions.memory_pool = options_.memory_pool.get();
   ipcWriteOptions.use_threads = false;
 
   tinyBatchWriteOptions_ = ipcWriteOptions;
@@ -289,7 +289,9 @@ arrow::Status VeloxShuffleWriter::doSplit(const velox::RowVector& rv) {
           {
             bool reuseBuffers = false;
             ARROW_ASSIGN_OR_RAISE(auto rb, createArrowRecordBatchFromBuffer(pid, /*resetBuffers = */ !reuseBuffers));
-            RETURN_NOT_OK(cacheRecordBatch(pid, *rb, reuseBuffers));
+            if (rb) {
+              RETURN_NOT_OK(cacheRecordBatch(pid, *rb, reuseBuffers));
+            }
           }
           // partitionEvictor[pid]->doEvict();
           if (options_.prefer_evict) {
@@ -303,7 +305,9 @@ arrow::Status VeloxShuffleWriter::doSplit(const velox::RowVector& rv) {
           {
             bool reuseBuffers = true;
             ARROW_ASSIGN_OR_RAISE(auto rb, createArrowRecordBatchFromBuffer(pid, /*resetBuffers = */ !reuseBuffers));
-            RETURN_NOT_OK(cacheRecordBatch(pid, *rb, reuseBuffers));
+            if (rb) {
+              RETURN_NOT_OK(cacheRecordBatch(pid, *rb, reuseBuffers));
+            }
           }
           // partitionEvictor[pid]->doEvict();
           if (options_.prefer_evict) {
@@ -312,7 +316,7 @@ arrow::Status VeloxShuffleWriter::doSplit(const velox::RowVector& rv) {
           } else {
             auto cachedSize =
                 std::accumulate(partitionCachedRecordbatchSize_.begin(), partitionCachedRecordbatchSize_.end(), 0LL);
-            const static auto kMemoryPoolThreshold = parseMemoryEnv();
+            const static auto kMemoryPoolThreshold = parseMemoryEnv("SPILL_THRESHOLD");
             if (cachedSize > kMemoryPoolThreshold) {
               RETURN_NOT_OK(evictPartition(-1));
             }
@@ -1081,14 +1085,16 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
 
   arrow::Status VeloxShuffleWriter::createRecordBatchFromBuffer(uint32_t partitionId, bool resetBuffers) {
     ARROW_ASSIGN_OR_RAISE(auto rb, createArrowRecordBatchFromBuffer(partitionId, resetBuffers));
-    RETURN_NOT_OK(cacheRecordBatch(partitionId, *rb, false));
+    if (rb) {
+      RETURN_NOT_OK(cacheRecordBatch(partitionId, *rb, false));
+    }
     return arrow::Status::OK();
   }
 
   arrow::Result<std::shared_ptr<arrow::RecordBatch>> VeloxShuffleWriter::createArrowRecordBatchFromBuffer(
       uint32_t partitionId, bool resetBuffers) {
     if (partitionBufferIdxBase_[partitionId] <= 0) {
-      return arrow::RecordBatch::MakeEmpty(schema_, options_.memory_pool.get());
+      return nullptr;
     }
 
     auto numRows = partitionBufferIdxBase_[partitionId];
