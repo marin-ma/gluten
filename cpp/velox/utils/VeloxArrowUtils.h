@@ -104,9 +104,7 @@ class LargeMemoryPool : public arrow::MemoryPool {
  public:
   constexpr static uint64_t kHugePageSize = 1 << 21;
 
-  explicit LargeMemoryPool() {
-    capacity_ = parseMemoryEnv("MEMORYPOOL_CAPACITY");
-  }
+  explicit LargeMemoryPool() : capacity_(std::numeric_limits<int64_t>::max()) {}
   explicit LargeMemoryPool(int64_t capacity) : capacity_(capacity) {}
 
   ~LargeMemoryPool() override = default;
