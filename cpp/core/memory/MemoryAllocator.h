@@ -81,6 +81,8 @@ class ListenableMemoryAllocator final : public MemoryAllocator {
 
   int64_t getBytes() const override;
 
+  std::shared_ptr<AllocationListener> getListener() const;
+
  private:
   MemoryAllocator* delegated_;
   std::shared_ptr<AllocationListener> listener_;

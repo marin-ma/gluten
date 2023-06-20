@@ -773,6 +773,9 @@ JNIEXPORT jlong JNICALL Java_io_glutenproject_vectorized_ShuffleWriterJniWrapper
     gluten::jniThrow("Memory pool does not exist or has been closed");
   }
   shuffleWriterOptions.memory_pool = asArrowMemoryPool(allocator);
+  auto listener = reinterpret_cast<ListenableMemoryAllocator*>(allocatorId)->getListener();
+  auto ipcMemoryPool = std::make_shared<MMapMemoryPool>(std::move(listener));
+  shuffleWriterOptions.ipc_memory_pool = std::move(ipcMemoryPool);
 
   jclass cls = env->FindClass("java/lang/Thread");
   jmethodID mid = env->GetStaticMethodID(cls, "currentThread", "()Ljava/lang/Thread;");

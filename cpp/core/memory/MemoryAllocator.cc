@@ -113,6 +113,10 @@ int64_t ListenableMemoryAllocator::getBytes() const {
   return bytes_;
 }
 
+std::shared_ptr<AllocationListener> ListenableMemoryAllocator::getListener() const {
+  return listener_;
+}
+
 bool StdMemoryAllocator::allocate(int64_t size, void** out) {
   *out = std::malloc(size);
   bytes_ += size;
