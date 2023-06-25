@@ -322,7 +322,7 @@ class BenchmarkShuffleSplitIterateScanBenchmark : public BenchmarkShuffleSplit {
       std::cout << schema_->ToString() << std::endl;
 
     auto* pool = options.memory_pool.get();
-    auto ipcMemoryPool = std::make_shared<MMapMemoryPool>();
+    auto ipcMemoryPool = std::make_shared<LargePageMemoryPool>();
     auto* shuffleWriterPtr = shuffleWriter.get();
     ipcMemoryPool->SetSpillFunc(
         [shuffleWriterPtr](int64_t size, int64_t* actual) { return shuffleWriterPtr->evictFixedSize(size, actual); });

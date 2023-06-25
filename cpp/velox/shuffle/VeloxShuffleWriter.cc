@@ -138,17 +138,16 @@ arrow::Status VeloxShuffleWriter::init() {
 
 arrow::Status VeloxShuffleWriter::initIpcWriteOptions() {
   auto& ipcWriteOptions = options_.ipc_write_options;
-  //  if (options_.prefer_evict) {
-  //    ipcWriteOptions.memory_pool = options_.memory_pool.get();
-  //  } else {
-  //    if (!options_.ipc_memory_pool) {
-  //      auto ipcMemoryPool = std::make_shared<MMapMemoryPool>();
-  //      ipcMemoryPool->SetSpillFunc([this](int64_t size, int64_t* actual) { return this->evictFixedSize(size, actual);
-  //      }); options_.ipc_memory_pool = std::move(ipcMemoryPool);
-  //    }
-  //    ipcWriteOptions.memory_pool = options_.ipc_memory_pool.get();
-  //  }
-  ipcWriteOptions.memory_pool = options_.memory_pool.get();
+  if (options_.prefer_evict) {
+    ipcWriteOptions.memory_pool = options_.memory_pool.get();
+  } else {
+    if (!options_.ipc_memory_pool) {
+      auto ipcMemoryPool = std::make_shared<LargePageMemoryPool>();
+      ipcMemoryPool->SetSpillFunc([this](int64_t size, int64_t* actual) { return this->evictFixedSize(size, actual); });
+      options_.ipc_memory_pool = std::move(ipcMemoryPool);
+    }
+    ipcWriteOptions.memory_pool = options_.ipc_memory_pool.get();
+  }
   ipcWriteOptions.use_threads = false;
 
   tinyBatchWriteOptions_ = ipcWriteOptions;
@@ -1078,22 +1077,6 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
               memcpy(copy->mutable_data(), buffer->data(), static_cast<size_t>(buffer->size()));
             }
             buffer = std::move(copy);
-          }
-        }
-      }
-    } else {
-      // With compression, make buffers shrink-to-fit
-      for (auto i = 0; i < payload->body_buffers.size(); ++i) {
-        auto& buffer = payload->body_buffers[i];
-        if (buffer && buffer->size() > 0) {
-          if (buffer->parent()) { // A compressed Buffer is created from SliceBuffer(parent)
-            auto parent = std::dynamic_pointer_cast<arrow::ResizableBuffer>(buffer->parent());
-            RETURN_NOT_OK(parent->Resize(buffer->size(), /* shrink_to_fit= */ true));
-            if (parent->data() != buffer->data()) {
-              payload->body_buffers[i] = arrow::SliceBuffer(parent, 0, buffer->size());
-            }
-          } else {
-            return arrow::Status::Invalid("Cannot shrink buffer.");
           }
         }
       }
