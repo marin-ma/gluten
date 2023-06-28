@@ -270,24 +270,25 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
       TIME_NANO_OR_THROW(elapseRead, recordBatchReader->ReadNext(&recordBatch));
 
       if (recordBatch) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto pidbuf,
+        std::shared_ptr<arrow::ResizableBuffer> pidbuf;
+        ARROW_ASSIGN_OR_THROW(
+            pidbuf,
             arrow::AllocateResizableBuffer(recordBatch->num_rows() * sizeof(uint32_t), options.memory_pool.get()));
         for (int r = 0; r < recordBatch->num_rows(); r++) {
           (reinterpret_cast<uint32_t*>(pidbuf->mutable_data()))[r] = rand() % numPartitions;
         }
         std::shared_ptr<arrow::DataType> int_type = schema_->field(3)->type();
-        std::vector<std::shared_ptr<Buffer>> buffers;
+        std::vector<std::shared_ptr<arrow::Buffer>> buffers;
         buffers.push_back(pidbuf);
         buffers.push_back(std::shared_ptr<arrow::Buffer>(nullptr));
 
-        auto pidarr = arrow::MakeArray(
-            arrow::ArrayData::Make(int_type, numRows, {pidbuf, std::shared_ptr<arrow::Buffer>(nullptr)}, 0, 0));
-        recordBatch->AddColumn(0, schema_->field(3), pidarr);
+        auto pidarr = arrow::MakeArray(arrow::ArrayData::Make(int_type, numRows, buffers, 0, 0));
+        std::shared_ptr<arrow::RecordBatch> recordBatchWithPid;
+        ARROW_ASSIGN_OR_THROW(recordBatchWithPid, recordBatch->AddColumn(0, schema_->field(3), pidarr));
 
-        batches.push_back(recordBatch);
+        batches.push_back(recordBatchWithPid);
         numBatches += 1;
-        numRows += recordBatch->num_rows();
+        numRows += recordBatchWithPid->num_rows();
       }
     } while (recordBatch);
     std::cout << "parquet parse done elapsed time " << elapseRead / 1000000 << " ms " << std::endl;
