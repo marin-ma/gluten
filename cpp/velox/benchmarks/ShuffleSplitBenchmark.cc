@@ -121,7 +121,7 @@ class BenchmarkShuffleSplit {
     options.prefer_evict = FLAGS_prefer_evict;
     options.write_schema = false;
     options.memory_pool = pool;
-    options.partitioning_name = "hash";
+    options.partitioning_name = "random";
 
     std::shared_ptr<VeloxShuffleWriter> shuffleWriter;
     int64_t elapseRead = 0;
@@ -282,7 +282,7 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
         buffers.push_back(pidbuf);
         buffers.push_back(std::shared_ptr<arrow::Buffer>(nullptr));
 
-        auto pidarr = arrow::MakeArray(arrow::ArrayData::Make(int_type, numRows, buffers, 0, 0));
+        auto pidarr = arrow::MakeArray(arrow::ArrayData::Make(int_type, recordBatch->num_rows(), buffers, 0, 0));
         std::shared_ptr<arrow::RecordBatch> recordBatchWithPid;
         ARROW_ASSIGN_OR_THROW(recordBatchWithPid, recordBatch->AddColumn(0, schema_->field(3), pidarr));
 
