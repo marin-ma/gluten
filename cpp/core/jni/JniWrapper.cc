@@ -330,9 +330,7 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
   env->DeleteGlobalRef(nativeColumnarToRowInfoClass);
   env->DeleteGlobalRef(byteArrayClass);
   env->DeleteGlobalRef(veloxColumnarbatchScannerClass);
-
-  malloc_stats_print(NULL, NULL, NULL);
-
+  //  malloc_stats_print(NULL, NULL, NULL);
 }
 
 JNIEXPORT jlong JNICALL

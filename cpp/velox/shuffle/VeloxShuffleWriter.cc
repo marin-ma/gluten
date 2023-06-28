@@ -142,8 +142,7 @@ arrow::Status VeloxShuffleWriter::initIpcWriteOptions() {
     ipcWriteOptions.memory_pool = options_.memory_pool.get();
   } else {
     if (!options_.ipc_memory_pool) {
-      auto ipcMemoryPool = std::make_shared<LargePageMemoryPool>();
-      ipcMemoryPool->SetSpillFunc([this](int64_t size, int64_t* actual) { return this->evictFixedSize(size, actual); });
+      auto ipcMemoryPool = std::make_shared<LargeMemoryPool>(options_.memory_pool.get());
       options_.ipc_memory_pool = std::move(ipcMemoryPool);
     }
     ipcWriteOptions.memory_pool = options_.ipc_memory_pool.get();
