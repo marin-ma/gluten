@@ -25,8 +25,8 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/file_reader.h>
 #include <sched.h>
-
 #include <chrono>
+#include <cstdlib>
 
 #include "benchmarks/BenchmarkUtils.h"
 #include "memory/ColumnarBatch.h"
@@ -121,7 +121,7 @@ class BenchmarkShuffleSplit {
     options.prefer_evict = FLAGS_prefer_evict;
     options.write_schema = false;
     options.memory_pool = pool;
-    options.partitioning_name = "rr";
+    options.partitioning_name = "hash";
 
     std::shared_ptr<VeloxShuffleWriter> shuffleWriter;
     int64_t elapseRead = 0;
@@ -236,14 +236,7 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
       benchmark::State& state) {
     std::vector<int> localColumnIndices;
     // local_column_indices.push_back(0);
-    /*    local_column_indices.push_back(0);
-        local_column_indices.push_back(1);
-        local_column_indices.push_back(2);
-        local_column_indices.push_back(4);
-        local_column_indices.push_back(5);
-        local_column_indices.push_back(6);
-        local_column_indices.push_back(7);
-*/
+
     localColumnIndices.push_back(8);
     localColumnIndices.push_back(9);
     localColumnIndices.push_back(13);
@@ -252,11 +245,9 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
 
     std::shared_ptr<arrow::Schema> localSchema;
     arrow::FieldVector fields;
-    fields.push_back(schema_->field(8));
-    fields.push_back(schema_->field(9));
-    fields.push_back(schema_->field(13));
-    fields.push_back(schema_->field(14));
-    fields.push_back(schema_->field(15));
+    for_each(localColumnIndices.begin(), localColumnIndices.end(), [&fields, this](int f) {
+      fields.push_back(schema_->field(f));
+    });
     localSchema = std::make_shared<arrow::Schema>(fields);
 
     if (state.thread_index() == 0)
@@ -273,11 +264,27 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
         pool, ::parquet::ParquetFileReader::Open(file_), properties_, &parquetReader));
 
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
+    std::vector<std::shared_ptr<ColumnarBatch>> vectors;
     GLUTEN_THROW_NOT_OK(parquetReader->GetRecordBatchReader(rowGroupIndices_, localColumnIndices, &recordBatchReader));
     do {
       TIME_NANO_OR_THROW(elapseRead, recordBatchReader->ReadNext(&recordBatch));
 
       if (recordBatch) {
+        ARROW_ASSIGN_OR_RAISE(
+            auto pidbuf,
+            arrow::AllocateResizableBuffer(recordBatch->num_rows() * sizeof(uint32_t), options.memory_pool.get()));
+        for (int r = 0; r < recordBatch->num_rows(); r++) {
+          (reinterpret_cast<uint32_t*>(pidbuf->mutable_data()))[r] = rand() % numPartitions;
+        }
+        std::shared_ptr<arrow::DataType> int_type = schema_->field(3)->type();
+        std::vector<std::shared_ptr<Buffer>> buffers;
+        buffers.push_back(pidbuf);
+        buffers.push_back(std::shared_ptr<arrow::Buffer>(nullptr));
+
+        auto pidarr = arrow::MakeArray(
+            arrow::ArrayData::Make(int_type, numRows, {pidbuf, std::shared_ptr<arrow::Buffer>(nullptr)}, 0, 0));
+        recordBatch->AddColumn(0, schema_->field(3), pidarr);
+
         batches.push_back(recordBatch);
         numBatches += 1;
         numRows += recordBatch->num_rows();
@@ -286,14 +293,23 @@ class BenchmarkShuffleSplitCacheScanBenchmark : public BenchmarkShuffleSplit {
     std::cout << "parquet parse done elapsed time " << elapseRead / 1000000 << " ms " << std::endl;
     std::cout << "batches = " << numBatches << " rows = " << numRows << std::endl;
 
+    auto arrow2velox_convert_start = std::chrono::steady_clock::now();
+    for_each(batches.cbegin(), batches.cend(), [&vectors](const std::shared_ptr<arrow::RecordBatch>& batch) {
+      std::shared_ptr<ColumnarBatch> cb;
+      ARROW_ASSIGN_OR_THROW(cb, recordBatch2VeloxColumnarBatch(*batch));
+      vectors.push_back(cb);
+    });
+    auto arrow2velox_convert_end = std::chrono::steady_clock::now();
+    auto convert_time =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(arrow2velox_convert_end - arrow2velox_convert_start)
+            .count();
+
+    std::cout << "arrow to velox convert time " << convert_time / 1000000 << " ms " << std::endl;
+
     for (auto _ : state) {
       for_each(
-          batches.cbegin(),
-          batches.cend(),
-          [&shuffleWriter, &splitTime](const std::shared_ptr<arrow::RecordBatch>& recordBatch) {
-            std::shared_ptr<ColumnarBatch> cb;
-            ARROW_ASSIGN_OR_THROW(cb, recordBatch2VeloxColumnarBatch(*recordBatch));
-            TIME_NANO_OR_THROW(splitTime, shuffleWriter->split(cb.get()));
+          vectors.cbegin(), vectors.cend(), [&shuffleWriter, &splitTime](const std::shared_ptr<ColumnarBatch>& vector) {
+            TIME_NANO_OR_THROW(splitTime, shuffleWriter->split(vector.get()));
           });
       // std::cout << " split done memory allocated = " <<
       // options.memory_pool->bytes_allocated() << std::endl;
@@ -369,9 +385,9 @@ int main(int argc, char** argv) {
     FLAGS_partitions = std::thread::hardware_concurrency();
   }
 
-  gluten::BenchmarkShuffleSplitIterateScanBenchmark iterateScanBenchmark(FLAGS_file);
+  gluten::BenchmarkShuffleSplitCacheScanBenchmark CacheScanBenchmark(FLAGS_file);
 
-  auto bm = benchmark::RegisterBenchmark("BenchmarkShuffleSplit::IterateScan", iterateScanBenchmark)
+  auto bm = benchmark::RegisterBenchmark("BenchmarkShuffleSplit::IterateScan", CacheScanBenchmark)
                 ->Args({
                     FLAGS_prefer_evict,
                 })

@@ -34,4 +34,15 @@ class RoundRobinPartitioner final : public ShuffleWriter::Partitioner {
   int32_t pidSelection_ = 0;
 };
 
+class RandomPartitioner final : public ShuffleWriter::Partitioner {
+ public:
+  RandomPartitioner(int32_t numPartitions, bool hasPid) : Partitioner(numPartitions, hasPid) {}
+
+  arrow::Status compute(
+      const int32_t* pidArr,
+      const int64_t numRows,
+      std::vector<uint16_t>& partitionId,
+      std::vector<uint32_t>& partitionIdCnt) override;
+};
+
 } // namespace gluten

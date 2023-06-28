@@ -30,6 +30,8 @@ arrow::Result<std::shared_ptr<ShuffleWriter::Partitioner>> ShuffleWriter::Partit
     partitioner = ShuffleWriter::Partitioner::create<HashPartitioner>(numPartitions, true);
   } else if (name == "rr") {
     partitioner = ShuffleWriter::Partitioner::create<RoundRobinPartitioner>(numPartitions, false);
+  } else if (name == "random") {
+    partitioner = ShuffleWriter::Partitioner::create<RandomPartitioner>(numPartitions, false);
   } else if (name == "range") {
     partitioner = ShuffleWriter::Partitioner::create<FallbackRangePartitioner>(numPartitions, true);
   } else if (name == "single") {

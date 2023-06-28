@@ -16,6 +16,7 @@
  */
 
 #include "shuffle/RoundRobinPartitioner.h"
+#include <cstdlib>
 
 namespace gluten {
 
@@ -33,4 +34,21 @@ arrow::Status gluten::RoundRobinPartitioner::compute(
   }
   return arrow::Status::OK();
 }
+
+arrow::Status gluten::RandomPartitioner::compute(
+    const int32_t* pidArr,
+    const int64_t numRows,
+    std::vector<uint16_t>& partitionId,
+    std::vector<uint32_t>& partitionIdCnt) {
+  std::fill(std::begin(partitionIdCnt), std::end(partitionIdCnt), 0);
+  partitionId.resize(numRows);
+  srand(0);
+
+  for (auto& pid : partitionId) {
+    pid = rand() % numPartitions_;
+    partitionIdCnt[pid]++;
+  }
+  return arrow::Status::OK();
+}
+
 } // namespace gluten
