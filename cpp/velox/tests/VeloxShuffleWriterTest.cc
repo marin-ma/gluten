@@ -318,7 +318,7 @@ TEST_P(VeloxShuffleWriterTest, TestRoundRobinPartitioner) {
 }
 
 TEST_P(VeloxShuffleWriterTest, TestShuffleWriterMemoryLeak) {
-  std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>(17 * 1024 * 1024);
+  std::shared_ptr<arrow::MemoryPool> pool = std::make_shared<MyMemoryPool>();
 
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 4;

@@ -107,7 +107,7 @@ class LargeMemoryPool : public arrow::MemoryPool {
 
   arrow::Status Allocate(int64_t size, int64_t alignment, uint8_t** out) override {
     if (size == 0) {
-      RETURN_NOT_OK(doAlloc(0, alignment, out));
+      return pool_->Allocate(0, alignment, out);
     }
     // make sure the size is cache line size aligned
     size = ROUND_TO_LINE(size, alignment);
@@ -116,7 +116,7 @@ class LargeMemoryPool : public arrow::MemoryPool {
       auto freedIt = std::find_if(
           freedBuffers_.begin(), freedBuffers_.end(), [size](BufferAllocated& buf) { return size <= buf.size; });
       if (freedIt != freedBuffers_.end()) {
-        buffers_.push_back({freedIt->startAddr, freedIt->startAddr, 0, 0, freedIt->size});
+        buffers_.push_back({freedIt->startAddr, freedIt->startAddr, freedIt->size, 0, 0});
         freedBuffers_.erase(freedIt);
       } else {
         // Allocate new page. Align to kHugePageSize.
@@ -125,7 +125,7 @@ class LargeMemoryPool : public arrow::MemoryPool {
 
         RETURN_NOT_OK(doAlloc(allocSize, kHugePageSize, &allocAddr));
         madvise(allocAddr, size, MADV_WILLNEED);
-        buffers_.push_back({allocAddr, allocAddr, 0, 0, allocSize});
+        buffers_.push_back({allocAddr, allocAddr, allocSize, 0, 0});
       }
     }
     auto& last = buffers_.back();
@@ -137,7 +137,7 @@ class LargeMemoryPool : public arrow::MemoryPool {
 
   void Free(uint8_t* buffer, int64_t size, int64_t alignment) override {
     if (size == 0) {
-      return pool_->Free(buffer, 0, alignment);
+      return;
     }
     // make sure the size is cache line size aligned
     size = ROUND_TO_LINE(size, alignment);

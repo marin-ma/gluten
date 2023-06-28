@@ -225,6 +225,9 @@ arrow::Status VeloxShuffleWriter::split(std::shared_ptr<ColumnarBatch> cb) {
 arrow::Status VeloxShuffleWriter::stop() {
   EVAL_START("write", options_.thread_id)
   RETURN_NOT_OK(partitionWriter_->stop());
+  if (options_.ipc_memory_pool != options_.memory_pool) {
+    options_.ipc_memory_pool.reset();
+  }
   EVAL_END("write", options_.thread_id, options_.task_attempt_id)
 
   return arrow::Status::OK();
