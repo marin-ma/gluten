@@ -17,40 +17,50 @@
 
 package io.glutenproject.vectorized
 
-import java.io._
-import java.nio.ByteBuffer
-import scala.reflect.ClassTag
 import io.glutenproject.columnarbatch.ColumnarBatches
 import io.glutenproject.memory.alloc.NativeMemoryAllocators
 import io.glutenproject.memory.arrowalloc.ArrowBufferAllocators
 import io.glutenproject.utils.ArrowAbiUtil
-import org.apache.arrow.c.ArrowSchema
-import org.apache.arrow.memory.BufferAllocator
-import org.apache.arrow.vector.VectorLoader
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.utils.SparkSchemaUtil
-import org.apache.spark.sql.vectorized.{ColumnVector, ColumnarBatch}
+import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.util.memory.TaskResources
 
-class ColumnarBatchSerializer(schema: StructType, readBatchNumRows: SQLMetric,
-  numOutputRows: SQLMetric)
-  extends Serializer with Serializable {
+import org.apache.arrow.c.ArrowSchema
+import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.vector.VectorLoader
+
+import java.io._
+import java.nio.ByteBuffer
+
+import scala.reflect.ClassTag
+
+class ColumnarBatchSerializer(
+    schema: StructType,
+    readBatchNumRows: SQLMetric,
+    numOutputRows: SQLMetric,
+    decompressTime: SQLMetric)
+  extends Serializer
+  with Serializable {
 
   /** Creates a new [[SerializerInstance]]. */
   override def newInstance(): SerializerInstance = {
-    new ColumnarBatchSerializerInstance(schema, readBatchNumRows, numOutputRows)
+    new ColumnarBatchSerializerInstance(schema, readBatchNumRows, numOutputRows, decompressTime)
   }
 }
 
-private class ColumnarBatchSerializerInstance(schema: StructType,
-  readBatchNumRows: SQLMetric,
-  numOutputRows: SQLMetric)
+private class ColumnarBatchSerializerInstance(
+    schema: StructType,
+    readBatchNumRows: SQLMetric,
+    numOutputRows: SQLMetric,
+    decompressTime: SQLMetric)
   extends SerializerInstance
-    with Logging {
+  with Logging {
 
   override def deserializeStream(in: InputStream): DeserializationStream = {
     new DeserializationStream {
@@ -58,6 +68,8 @@ private class ColumnarBatchSerializerInstance(schema: StructType,
       private val allocator: BufferAllocator = ArrowBufferAllocators
         .contextInstance()
         .newChildAllocator("GlutenColumnarBatch deserialize", 0, Long.MaxValue)
+
+      private val readerMetrics = new ShuffleReaderMetrics()
 
       private lazy val jniByteInputStream = JniByteInputStreams.create(in)
       private lazy val cSchema = ArrowSchema.allocateNew(ArrowBufferAllocators.contextInstance())
@@ -67,8 +79,10 @@ private class ColumnarBatchSerializerInstance(schema: StructType,
           SparkSchemaUtil.toArrowSchema(schema, SQLConf.get.sessionLocalTimeZone)
         ArrowAbiUtil.exportSchema(allocator, arrowSchema, cSchema)
         val handle = ShuffleReaderJniWrapper.INSTANCE.make(
-          jniByteInputStream, cSchema.memoryAddress(),
-          NativeMemoryAllocators.contextInstance.getNativeInstanceId)
+          jniByteInputStream,
+          cSchema.memoryAddress(),
+          NativeMemoryAllocators.contextInstance.getNativeInstanceId,
+          readerMetrics)
         // Close shuffle reader instance as lately as the end of task processing,
         // since the native reader could hold a reference to memory pool that
         // was used to create all buffers read from shuffle reader. The pool
@@ -109,14 +123,15 @@ private class ColumnarBatchSerializerInstance(schema: StructType,
           cb = null
         }
         val batch = {
-          val batchHandle = try {
-            ShuffleReaderJniWrapper.INSTANCE.next(shuffleReaderHandle)
-          } catch {
-            case ioe: IOException =>
-              this.close()
-              logError("Failed to load next RecordBatch", ioe)
-              throw ioe
-          }
+          val batchHandle =
+            try {
+              ShuffleReaderJniWrapper.INSTANCE.next(shuffleReaderHandle)
+            } catch {
+              case ioe: IOException =>
+                this.close()
+                logError("Failed to load next RecordBatch", ioe)
+                throw ioe
+            }
           if (batchHandle == -1L) {
             // EOF reached
             this.close()
@@ -125,7 +140,7 @@ private class ColumnarBatchSerializerInstance(schema: StructType,
           ColumnarBatches.create(batchHandle)
         }
         val numRows = batch.numRows()
-        logDebug(s"Read ColumnarBatch of ${numRows} rows")
+        logDebug(s"Read ColumnarBatch of $numRows rows")
         numBatchesTotal += 1
         numRowsTotal += numRows
         cb = batch
@@ -148,6 +163,7 @@ private class ColumnarBatchSerializerInstance(schema: StructType,
           if (cb != null) cb.close()
           allocator.close()
           isClosed = true
+          decompressTime += readerMetrics.decompressTime
         }
       }
     }

@@ -20,42 +20,46 @@ package io.glutenproject.backendsapi.velox
 import io.glutenproject.GlutenConfig
 import io.glutenproject.backendsapi.SparkPlanExecApi
 import io.glutenproject.columnarbatch.ColumnarBatches
-import io.glutenproject.execution.ColumnarRules.LoadBeforeColumnarToRow
 import io.glutenproject.execution._
+import io.glutenproject.execution.ColumnarRules.LoadBeforeColumnarToRow
 import io.glutenproject.expression._
 import io.glutenproject.memory.arrowalloc.ArrowBufferAllocators
 import io.glutenproject.utils.ArrowUtil
 import io.glutenproject.vectorized.{ArrowWritableColumnVector, ColumnarBatchSerializer}
-import org.apache.commons.lang3.ClassUtils
+
 import org.apache.spark.{ShuffleDependency, SparkException}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
-import org.apache.spark.shuffle.utils.ShuffleUtil
 import org.apache.spark.shuffle.{GenShuffleWriterParameters, GlutenShuffleWriterWrapper}
+import org.apache.spark.shuffle.utils.ShuffleUtil
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.AggregateFunctionRewriteRule
-import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, HLLAdapter}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Cast, CreateNamedStruct, Expression, GetStructField, Literal, NamedExpression, StringTrim}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, HLLAdapter}
 import org.apache.spark.sql.catalyst.optimizer.BuildSide
 import org.apache.spark.sql.catalyst.plans.JoinType
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.plans.physical.{BroadcastMode, Partitioning}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.execution.{ColumnarBuildSideRelation, SparkPlan, VeloxColumnarToRowExec}
 import org.apache.spark.sql.execution.datasources.ColumnarToFakeRowStrategy
 import org.apache.spark.sql.execution.datasources.GlutenColumnarRules.NativeWritePostRule
 import org.apache.spark.sql.execution.exchange.BroadcastExchangeExec
 import org.apache.spark.sql.execution.joins.BuildSideRelation
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.execution.utils.ExecUtil
-import org.apache.spark.sql.execution.{ColumnarBuildSideRelation, SparkPlan, VeloxColumnarToRowExec}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.ColumnarBatch
+
+import org.apache.commons.lang3.ClassUtils
 
 import scala.collection.mutable.ArrayBuffer
 
 class SparkPlanExecHandler extends SparkPlanExecApi {
 
-  /** * Plans. */
+  /**
+   * * Plans.
+   */
 
   /**
    * Generate ColumnarToRowExecBase.
@@ -78,16 +82,18 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
   /**
    * Generate FilterExecTransformer.
    *
-   * @param condition : the filter condition
-   * @param child     : the chid of FilterExec
-   * @return the transformer of FilterExec
+   * @param condition
+   *   : the filter condition
+   * @param child
+   *   : the chid of FilterExec
+   * @return
+   *   the transformer of FilterExec
    */
-  override def genFilterExecTransformer(condition: Expression, child: SparkPlan)
-  : FilterExecTransformerBase = FilterExecTransformer(condition, child)
+  override def genFilterExecTransformer(
+      condition: Expression,
+      child: SparkPlan): FilterExecTransformerBase = FilterExecTransformer(condition, child)
 
-  /**
-   * Generate HashAggregateExecTransformer.
-   */
+  /** Generate HashAggregateExecTransformer. */
   override def genHashAggregateExecTransformer(
       requiredChildDistributionExpressions: Option[Seq[Expression]],
       groupingExpressions: Seq[NamedExpression],
@@ -105,38 +111,50 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
       resultExpressions,
       child)
 
-  /**
-   * Generate ShuffledHashJoinExecTransformer.
-   */
-  override def genShuffledHashJoinExecTransformer(leftKeys: Seq[Expression],
-                                                  rightKeys: Seq[Expression],
-                                                  joinType: JoinType,
-                                                  buildSide: BuildSide,
-                                                  condition: Option[Expression],
-                                                  left: SparkPlan,
-                                                  right: SparkPlan,
-                                                  isSkewJoin: Boolean)
-  : ShuffledHashJoinExecTransformerBase =
+  /** Generate ShuffledHashJoinExecTransformer. */
+  override def genShuffledHashJoinExecTransformer(
+      leftKeys: Seq[Expression],
+      rightKeys: Seq[Expression],
+      joinType: JoinType,
+      buildSide: BuildSide,
+      condition: Option[Expression],
+      left: SparkPlan,
+      right: SparkPlan,
+      isSkewJoin: Boolean): ShuffledHashJoinExecTransformerBase =
     ShuffledHashJoinExecTransformer(
-      leftKeys, rightKeys, joinType, buildSide, condition, left, right, isSkewJoin)
+      leftKeys,
+      rightKeys,
+      joinType,
+      buildSide,
+      condition,
+      left,
+      right,
+      isSkewJoin)
 
-  /**
-   * Generate BroadcastHashJoinExecTransformer.
-   */
-  override def genBroadcastHashJoinExecTransformer(leftKeys: Seq[Expression],
-                                                   rightKeys: Seq[Expression],
-                                                   joinType: JoinType,
-                                                   buildSide: BuildSide,
-                                                   condition: Option[Expression],
-                                                   left: SparkPlan,
-                                                   right: SparkPlan,
-                                                   isNullAwareAntiJoin: Boolean = false)
-  : BroadcastHashJoinExecTransformer = GlutenBroadcastHashJoinExecTransformer(
-    leftKeys, rightKeys, joinType, buildSide, condition, left, right, isNullAwareAntiJoin)
+  /** Generate BroadcastHashJoinExecTransformer. */
+  override def genBroadcastHashJoinExecTransformer(
+      leftKeys: Seq[Expression],
+      rightKeys: Seq[Expression],
+      joinType: JoinType,
+      buildSide: BuildSide,
+      condition: Option[Expression],
+      left: SparkPlan,
+      right: SparkPlan,
+      isNullAwareAntiJoin: Boolean = false): BroadcastHashJoinExecTransformer =
+    GlutenBroadcastHashJoinExecTransformer(
+      leftKeys,
+      rightKeys,
+      joinType,
+      buildSide,
+      condition,
+      left,
+      right,
+      isNullAwareAntiJoin)
 
-  override def genHashExpressionTransformer(substraitExprName: String,
-                                            exps: Seq[ExpressionTransformer],
-                                            original: Expression): ExpressionTransformer = {
+  override def genHashExpressionTransformer(
+      substraitExprName: String,
+      exps: Seq[ExpressionTransformer],
+      original: Expression): ExpressionTransformer = {
     HashExpressionTransformer(substraitExprName, exps, original)
   }
 
@@ -146,13 +164,14 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
    * @return
    */
   // scalastyle:off argcount
-  override def genShuffleDependency(rdd: RDD[ColumnarBatch], childOutputAttributes: Seq[Attribute],
-                                    projectOutputAttributes: Seq[Attribute],
-                                    newPartitioning: Partitioning,
-                                    serializer: Serializer,
-                                    writeMetrics: Map[String, SQLMetric],
-                                    metrics: Map[String, SQLMetric])
-  : ShuffleDependency[Int, ColumnarBatch, ColumnarBatch] = {
+  override def genShuffleDependency(
+      rdd: RDD[ColumnarBatch],
+      childOutputAttributes: Seq[Attribute],
+      projectOutputAttributes: Seq[Attribute],
+      newPartitioning: Partitioning,
+      serializer: Serializer,
+      writeMetrics: Map[String, SQLMetric],
+      metrics: Map[String, SQLMetric]): ShuffleDependency[Int, ColumnarBatch, ColumnarBatch] = {
     // scalastyle:on argcount
     ExecUtil.genShuffleDependency(
       rdd,
@@ -169,8 +188,8 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
    *
    * @return
    */
-  override def genColumnarShuffleWriter[K, V](parameters: GenShuffleWriterParameters[K, V])
-  : GlutenShuffleWriterWrapper[K, V] = {
+  override def genColumnarShuffleWriter[K, V](
+      parameters: GenShuffleWriterParameters[K, V]): GlutenShuffleWriterWrapper[K, V] = {
     ShuffleUtil.genColumnarShuffleWriter(parameters)
   }
 
@@ -179,50 +198,53 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
    *
    * @return
    */
-  override def createColumnarBatchSerializer(schema: StructType,
-                                             readBatchNumRows: SQLMetric,
-                                             numOutputRows: SQLMetric,
-                                             dataSize: SQLMetric): Serializer = {
+  override def createColumnarBatchSerializer(
+      schema: StructType,
+      metrics: Map[String, SQLMetric]): Serializer = {
+    val readBatchNumRows = metrics("avgReadBatchNumRows")
+    val numOutputRows = metrics("numOutputRows")
+    val decompressTime = metrics("decompressTime")
     if (GlutenConfig.getConf.isUseCelebornShuffleManager) {
       val clazz = ClassUtils.getClass("org.apache.spark.shuffle.CelebornColumnarBatchSerializer")
-      val constructor = clazz.getConstructor(classOf[StructType],
-        classOf[SQLMetric], classOf[SQLMetric])
+      val constructor =
+        clazz.getConstructor(classOf[StructType], classOf[SQLMetric], classOf[SQLMetric])
       constructor.newInstance(schema, readBatchNumRows, numOutputRows).asInstanceOf[Serializer]
     } else {
       new ColumnarBatchSerializer(schema, readBatchNumRows, numOutputRows)
     }
   }
 
-  /**
-   * Create broadcast relation for BroadcastExchangeExec
-   */
-  override def createBroadcastRelation(mode: BroadcastMode,
-                                       child: SparkPlan,
-                                       numOutputRows: SQLMetric,
-                                       dataSize: SQLMetric): BuildSideRelation = {
+  /** Create broadcast relation for BroadcastExchangeExec */
+  override def createBroadcastRelation(
+      mode: BroadcastMode,
+      child: SparkPlan,
+      numOutputRows: SQLMetric,
+      dataSize: SQLMetric): BuildSideRelation = {
     val countsAndBytes = child
       .executeColumnar()
-      .mapPartitions { iter =>
-        var _numRows: Long = 0
-        val _input = new ArrayBuffer[ColumnarBatch]()
+      .mapPartitions {
+        iter =>
+          var _numRows: Long = 0
+          val _input = new ArrayBuffer[ColumnarBatch]()
 
-        try {
-          while (iter.hasNext) {
-            val batch = iter.next
-            val acb = ColumnarBatches
-              .ensureLoaded(ArrowBufferAllocators.contextInstance(), batch)
-            (0 until acb.numCols).foreach(i => {
-              acb.column(i).asInstanceOf[ArrowWritableColumnVector].retain()
-            })
-            _numRows += acb.numRows
-            _input += acb
+          try {
+            while (iter.hasNext) {
+              val batch = iter.next
+              val acb = ColumnarBatches
+                .ensureLoaded(ArrowBufferAllocators.contextInstance(), batch)
+              (0 until acb.numCols).foreach(
+                i => {
+                  acb.column(i).asInstanceOf[ArrowWritableColumnVector].retain()
+                })
+              _numRows += acb.numRows
+              _input += acb
+            }
+
+            val bytes = ArrowUtil.convertToNetty(_input.toArray)
+            Iterator((_numRows, bytes))
+          } finally {
+            _input.foreach(_.close)
           }
-
-          val bytes = ArrowUtil.convertToNetty(_input.toArray)
-          Iterator((_numRows, bytes))
-        } finally {
-          _input.foreach(_.close)
-        }
       }
       .collect
 
@@ -238,41 +260,42 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
     ColumnarBuildSideRelation(mode, child.output, batches)
   }
 
-  /** * Expressions. */
+  /**
+   * * Expressions.
+   */
 
   /**
    * Generate Alias transformer.
    *
-   * @return a transformer for alias
+   * @return
+   *   a transformer for alias
    */
-  override def genAliasTransformer(substraitExprName: String,
-                                   child: ExpressionTransformer,
-                                   original: Expression): AliasTransformerBase =
+  override def genAliasTransformer(
+      substraitExprName: String,
+      child: ExpressionTransformer,
+      original: Expression): AliasTransformerBase =
     new AliasTransformer(substraitExprName, child, original)
 
-  /**
-   * Generate an expression transformer to transform NamedStruct to Substrait.
-   */
-  override def genNamedStructTransformer(substraitExprName: String,
-                                         original: CreateNamedStruct,
-                                         attributeSeq: Seq[Attribute]): ExpressionTransformer = {
+  /** Generate an expression transformer to transform NamedStruct to Substrait. */
+  override def genNamedStructTransformer(
+      substraitExprName: String,
+      original: CreateNamedStruct,
+      attributeSeq: Seq[Attribute]): ExpressionTransformer = {
     NamedStructTransformer(substraitExprName, original, attributeSeq)
   }
 
-
-  /**
-   * Generate an ExpressionTransformer to transform GetStructFiled expression.
-   */
-  override def genGetStructFieldTransformer(substraitExprName: String,
-                                            childTransformer: ExpressionTransformer,
-                                            ordinal: Int,
-                                            original: GetStructField): ExpressionTransformer = {
+  /** Generate an ExpressionTransformer to transform GetStructFiled expression. */
+  override def genGetStructFieldTransformer(
+      substraitExprName: String,
+      childTransformer: ExpressionTransformer,
+      ordinal: Int,
+      original: GetStructField): ExpressionTransformer = {
     new GetStructFieldTransformer(substraitExprName, childTransformer, ordinal, original)
   }
 
   /**
-   * To align with spark in casting string type input to other types,
-   * add trim node for trimming space or whitespace. See spark's Cast.scala.
+   * To align with spark in casting string type input to other types, add trim node for trimming
+   * space or whitespace. See spark's Cast.scala.
    */
   override def genCastWithNewChild(c: Cast): Cast = {
     // Common whitespace to be trimmed, including: ' ', '\n', '\r', '\f', etc.
@@ -300,8 +323,11 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
       case _ =>
         c.child.dataType match {
           case StringType =>
-            val trimNode = StringTrim(c.child, Some(Literal(trimWhitespaceStr +
-              trimSpaceSepStr + trimLineSepStr + trimParaSepStr)))
+            val trimNode = StringTrim(
+              c.child,
+              Some(
+                Literal(trimWhitespaceStr +
+                  trimSpaceSepStr + trimLineSepStr + trimParaSepStr)))
             c.withNewChildren(Seq(trimNode)).asInstanceOf[Cast]
           case _ =>
             c
@@ -309,33 +335,31 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
     }
   }
 
-  /** * Rules and strategies. */
+  /**
+   * * Rules and strategies.
+   */
 
   /**
    * Generate extended DataSourceV2 Strategy.
    *
    * @return
    */
-  override def genExtendedDataSourceV2Strategies(): List[SparkSession =>
-    Strategy] = List()
+  override def genExtendedDataSourceV2Strategies(): List[SparkSession => Strategy] = List()
 
   /**
    * Generate extended Analyzer.
    *
    * @return
    */
-  override def genExtendedAnalyzers(): List[SparkSession =>
-    Rule[LogicalPlan]] = List()
+  override def genExtendedAnalyzers(): List[SparkSession => Rule[LogicalPlan]] = List()
 
   /**
-   * Generate extended Optimizer.
-   * Currently only for Velox backend.
+   * Generate extended Optimizer. Currently only for Velox backend.
    *
    * @return
    */
   override def genExtendedOptimizers(): List[SparkSession => Rule[LogicalPlan]] =
     List(AggregateFunctionRewriteRule)
-
 
   /**
    * Generate extended columnar pre-rules.
@@ -363,9 +387,7 @@ class SparkPlanExecHandler extends SparkPlanExecApi {
     List(ColumnarToFakeRowStrategy)
   }
 
-  /**
-   * Define backend specfic expression mappings.
-   */
+  /** Define backend specfic expression mappings. */
   override def extraExpressionMappings: Seq[Sig] = {
     Seq(Sig[HLLAdapter](ExpressionNames.APPROX_DISTINCT))
   }

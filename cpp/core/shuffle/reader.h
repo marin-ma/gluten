@@ -32,6 +32,7 @@ class Reader {
 
   arrow::Result<std::shared_ptr<ColumnarBatch>> next();
   arrow::Status close();
+  int64_t getDecompressTime();
 
  private:
   std::shared_ptr<arrow::MemoryPool> pool_;
@@ -40,6 +41,7 @@ class Reader {
   std::shared_ptr<arrow::Schema> schema_;
   std::unique_ptr<arrow::ipc::Message> firstMessage_;
   bool firstMessageConsumed_ = false;
+  int64_t decompressTime_ = 0;
 };
 
 } // namespace gluten
