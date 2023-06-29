@@ -1286,13 +1286,16 @@ arrow::Status VeloxShuffleWriter::splitFixedWidthValueBuffer(const velox::RowVec
       }
     } else {
       // Evict all cached partitions
-      int64_t totalCachedSize =
-          std::accumulate(partitionCachedRecordbatchSize_.begin(), partitionCachedRecordbatchSize_.end(), 0);
-      RETURN_NOT_OK(evictPartition(-1));
+      int64_t totalCachedSize = totalCachedPayloadSize();
+      if (totalCachedPayloadSize() <= 0) {
+        *size = 0;
+      } else {
+        RETURN_NOT_OK(evictPartition(-1));
 #ifdef GLUTEN_PRINT_DEBUG
-      std::cout << "Evicted all partition. " << std::to_string(totalCachedSize) << " bytes released" << std::endl;
+        std::cout << "Evicted all partition. " << std::to_string(totalCachedSize) << " bytes released" << std::endl;
 #endif
-      *size = totalCachedSize;
+        *size = totalCachedSize;
+      }
     }
     return arrow::Status::OK();
   }
