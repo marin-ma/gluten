@@ -160,9 +160,7 @@ trait SparkPlanExecApi {
    */
   def createColumnarBatchSerializer(
       schema: StructType,
-      readBatchNumRows: SQLMetric,
-      numOutputRows: SQLMetric,
-      dataSize: SQLMetric): Serializer
+      metrics: Map[String, SQLMetric]): Serializer
 
   /** Create broadcast relation for BroadcastExchangeExec */
   def createBroadcastRelation(

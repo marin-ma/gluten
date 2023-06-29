@@ -222,10 +222,11 @@ class CHSparkPlanExecApi extends SparkPlanExecApi {
    */
   override def createColumnarBatchSerializer(
       schema: StructType,
-      readBatchNumRows: SQLMetric,
-      numOutputRows: SQLMetric,
-      dataSize: SQLMetric): Serializer = {
-    new CHColumnarBatchSerializer(readBatchNumRows, numOutputRows, dataSize)
+      metrics: Map[String, SQLMetric]): Serializer = {
+    new CHColumnarBatchSerializer(
+      metrics("avgReadBatchNumRows"),
+      metrics("numOutputRows"),
+      metrics("dataSize"))
   }
 
   /** Create broadcast relation for BroadcastExchangeExec */
