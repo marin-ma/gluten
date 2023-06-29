@@ -124,6 +124,9 @@ class LargeMemoryPool : public arrow::MemoryPool {
         uint64_t allocSize = size > kLargeBufferSize ? ROUND_TO_LINE(size, kHugePageSize) : kLargeBufferSize;
 
         RETURN_NOT_OK(doAlloc(allocSize, kHugePageSize, &allocAddr));
+        if (!allocAddr) {
+          return arrow::Status::Invalid("doAlloc failed.");
+        }
         madvise(allocAddr, size, MADV_WILLNEED);
         buffers_.push_back({allocAddr, allocAddr, allocSize, 0, 0});
       }
