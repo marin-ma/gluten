@@ -27,7 +27,7 @@ macro(build_qpl)
 
     set(QPL_PREFIX
             "${CMAKE_CURRENT_BINARY_DIR}/qpl_ep-install")
-    set(QPL_SOURCE_DIR "${QPL_PREFIX}/src/qpl_ep")
+    set(QPL_SOURCE_DIR "/home/sparkuser/qpl-1.1.0")
     set(QPL_INCLUDE_DIR "${QPL_PREFIX}/include")
     set(QPL_LIB_DIR "${QPL_PREFIX}/lib")
     set(QPL_STATIC_LIB_NAME "${CMAKE_STATIC_LIBRARY_PREFIX}${QPL_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}${QPL_STATIC_LIB_MAJOR_VERSION}")
@@ -36,8 +36,6 @@ macro(build_qpl)
             )
     ExternalProject_Add(qpl_ep
             PREFIX ${QPL_PREFIX}
-            URL ${QPL_SOURCE_URL}
-            URL_HASH "SHA256=${QPL_BUILD_SHA256_CHECKSUM}"
             SOURCE_DIR ${QPL_SOURCE_DIR}
             CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${QPL_PREFIX}
