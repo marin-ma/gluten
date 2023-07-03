@@ -21,6 +21,7 @@ import io.glutenproject.GlutenConfig
 import io.glutenproject.columnarbatch.GlutenColumnarBatches
 import io.glutenproject.memory.alloc.{NativeMemoryAllocators, Spiller}
 import io.glutenproject.vectorized._
+
 import org.apache.spark._
 import org.apache.spark.internal.Logging
 import org.apache.spark.memory.{MemoryConsumer, SparkMemoryUtil}
@@ -31,12 +32,13 @@ import org.apache.spark.util.{SparkDirectoryUtil, SparkResourcesUtil, Utils}
 import java.io.IOException
 import java.util.UUID
 
-class ColumnarShuffleWriter[K, V](shuffleBlockResolver: IndexShuffleBlockResolver,
-                                        handle: BaseShuffleHandle[K, V, V],
-                                        mapId: Long,
-                                        writeMetrics: ShuffleWriteMetricsReporter)
+class ColumnarShuffleWriter[K, V](
+    shuffleBlockResolver: IndexShuffleBlockResolver,
+    handle: BaseShuffleHandle[K, V, V],
+    mapId: Long,
+    writeMetrics: ShuffleWriteMetricsReporter)
   extends ShuffleWriter[K, V]
-    with Logging {
+  with Logging {
 
   private val dep = handle.dependency.asInstanceOf[ColumnarShuffleDependency[K, V, V]]
 
@@ -60,6 +62,9 @@ class ColumnarShuffleWriter[K, V](shuffleBlockResolver: IndexShuffleBlockResolve
   private val nativeBufferSize = GlutenConfig.getConf.maxBatchSize
 
   private val compressionCodec = GlutenShuffleUtils.getCompressionCodec(conf)
+
+  private val compressionCodecBackend =
+    GlutenConfig.getConf.columnarShuffleCodecBackend.orNull
 
   private val batchCompressThreshold =
     GlutenConfig.getConf.columnarShuffleBatchCompressThreshold
@@ -117,6 +122,7 @@ class ColumnarShuffleWriter[K, V](shuffleBlockResolver: IndexShuffleBlockResolve
             availableOffHeapPerTask(),
             nativeBufferSize,
             compressionCodec,
+            compressionCodecBackend,
             batchCompressThreshold,
             dataTmp.getAbsolutePath,
             blockManager.subDirsPerLocalDir,
@@ -128,8 +134,8 @@ class ColumnarShuffleWriter[K, V](shuffleBlockResolver: IndexShuffleBlockResolve
                   if (nativeShuffleWriter == -1L) {
                     throw new IllegalStateException(
                       "Fatal: spill() called before a shuffle writer " +
-                      "is created. This behavior should be optimized by moving memory " +
-                      "allocations from make() to split()")
+                        "is created. This behavior should be optimized by moving memory " +
+                        "allocations from make() to split()")
                   }
                   logInfo(s"Gluten shuffle writer: Trying to spill $size bytes of data")
                   // fixme pass true when being called by self
@@ -137,10 +143,12 @@ class ColumnarShuffleWriter[K, V](shuffleBlockResolver: IndexShuffleBlockResolve
                   logInfo(s"Gluten shuffle writer: Spilled $spilled / $size bytes of data")
                   spilled
                 }
-              }).getNativeInstanceId,
+              })
+              .getNativeInstanceId,
             writeSchema,
             handle,
-            taskContext.taskAttemptId())
+            taskContext.taskAttemptId()
+          )
         }
         val startTime = System.nanoTime()
         val bytes = jniWrapper.split(nativeShuffleWriter, cb.numRows, handle)
@@ -158,9 +166,12 @@ class ColumnarShuffleWriter[K, V](shuffleBlockResolver: IndexShuffleBlockResolve
       splitResult = jniWrapper.stop(nativeShuffleWriter)
     }
 
-    dep.metrics("splitTime").add(System.nanoTime() - startTime - splitResult.getTotalSpillTime -
-      splitResult.getTotalWriteTime -
-      splitResult.getTotalCompressTime)
+    dep
+      .metrics("splitTime")
+      .add(
+        System.nanoTime() - startTime - splitResult.getTotalSpillTime -
+          splitResult.getTotalWriteTime -
+          splitResult.getTotalCompressTime)
     dep.metrics("spillTime").add(splitResult.getTotalSpillTime)
     dep.metrics("compressTime").add(splitResult.getTotalCompressTime)
     dep.metrics("bytesSpilled").add(splitResult.getTotalBytesSpilled)
