@@ -62,8 +62,10 @@ namespace gluten {
 #define ALIGNMENT 2 * 1024 * 1024
 
 const int32_t kQatGzip = 0;
-const int32_t kQplGzip = 1;
-const int32_t kLZ4 = 2;
+const int32_t kQatZstd = 1;
+const int32_t kQplGzip = 2;
+const int32_t kLZ4 = 3;
+const int32_t kZstd = 4;
 
 class MyMemoryPool final : public arrow::MemoryPool {
  public:
@@ -171,10 +173,20 @@ class BenchmarkCompression {
         GLUTEN_ASSIGN_OR_THROW(ipcWriteOptions.codec, createArrowIpcCodec(arrow::Compression::LZ4_FRAME));
         break;
       }
+      case gluten::kZstd: {
+        GLUTEN_ASSIGN_OR_THROW(ipcWriteOptions.codec, createArrowIpcCodec(arrow::Compression::ZSTD));
+        break;
+      }
 #ifdef GLUTEN_ENABLE_QAT
       case gluten::kQatGzip: {
-        qat::EnsureQatCodecRegistered("gzip");
+        qat::ensureQatCodecRegistered("gzip");
         GLUTEN_ASSIGN_OR_THROW(ipcWriteOptions.codec, createArrowIpcCodec(arrow::Compression::CUSTOM));
+        break;
+      }
+      case gluten::kQatZstd: {
+        qat::ensureQatCodecRegistered("zstd");
+        GLUTEN_ASSIGN_OR_THROW(ipcWriteOptions.codec, createArrowIpcCodec(arrow::Compression::CUSTOM));
+        std::cout << "load qatzstd" << std::endl;
         break;
       }
 #endif
@@ -391,7 +403,7 @@ int main(int argc, char** argv) {
   uint32_t cpuOffset = 0;
   std::string datafile;
   auto codec = gluten::kLZ4;
-  uint32_t splitBufferSize = 8192;
+  uint32_t splitBufferSize = 4096;
 
   for (int i = 0; i < argc; i++) {
     if (strcmp(argv[i], "--iterations") == 0) {
@@ -403,9 +415,15 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[i], "--qat-gzip") == 0) {
       std::cout << "QAT gzip is used as codec" << std::endl;
       codec = gluten::kQatGzip;
+    } else if (strcmp(argv[i], "--qat-zstd") == 0) {
+      std::cout << "QAT zstd is used as codec" << std::endl;
+      codec = gluten::kQatZstd;
     } else if (strcmp(argv[i], "--qpl-gzip") == 0) {
       std::cout << "QPL gzip is used as codec" << std::endl;
       codec = gluten::kQplGzip;
+    } else if (strcmp(argv[i], "--zstd") == 0) {
+      std::cout << "CPU zstd is used as codec" << std::endl;
+      codec = gluten::kZstd;
     } else if (strcmp(argv[i], "--busy") == 0) {
       GLUTEN_THROW_NOT_OK(arrow::internal::SetEnvVar("QZ_POLLING_MODE", "BUSY"));
     } else if (strcmp(argv[i], "--buffer-size") == 0) {

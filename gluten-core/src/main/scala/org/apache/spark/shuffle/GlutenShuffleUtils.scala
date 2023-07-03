@@ -40,17 +40,14 @@ object GlutenShuffleUtils {
         val glutenCodecKey = GlutenConfig.COLUMNAR_SHUFFLE_CODEC.key
         if (glutenConfig.columnarShuffleEnableQat) {
           checkCodecValues(glutenCodecKey, codec, GlutenConfig.GLUTEN_QAT_SUPPORTED_CODEC)
-          GlutenConfig.GLUTEN_QAT_CODEC_PREFIX + codec
         } else if (glutenConfig.columnarShuffleEnableIaa) {
           checkCodecValues(glutenCodecKey, codec, GlutenConfig.GLUTEN_IAA_SUPPORTED_CODEC)
-          GlutenConfig.GLUTEN_IAA_CODEC_PREFIX + codec
-        } else {
-          codec
         }
+        codec
       case None =>
         val sparkCodecKey = IO_COMPRESSION_CODEC.key
         val codec =
-          conf.get(sparkCodecKey, IO_COMPRESSION_CODEC.defaultValueString).toUpperCase(Locale.ROOT)
+          conf.get(sparkCodecKey, IO_COMPRESSION_CODEC.defaultValueString)
         checkCodecValues(sparkCodecKey, codec, GlutenConfig.GLUTEN_SHUFFLE_SUPPORTED_CODEC)
         codec
     }
