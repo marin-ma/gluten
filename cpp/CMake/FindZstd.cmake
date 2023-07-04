@@ -15,18 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# ZSTDLIB environmental variable is used to check for Zstd headers and static library
+# ZSTD_HOME environmental variable is used to check for Zstd headers and static library
 
 # ZSTD_INCLUDE_DIR: directory containing headers
 # ZSTD_LIBRARY: path to libzstd
 # ZSTD_STATIC_LIB: path to libzstd.a
 # ZSTD_FOUND: whether zstd has been found
 
-if( NOT "${ZSTDLIB}" STREQUAL "")
-    file (TO_CMAKE_PATH "${ZSTDLIB}" _zstd_path)
+if( NOT "$ENV{ZSTD_HOME}" STREQUAL "")
+    file (TO_CMAKE_PATH "${ZSTD_HOME}" _zstd_path)
 endif()
 
-message (STATUS "ZSTDLIB: ${ZSTDLIB}")
+message (STATUS "ZSTD_HOME: ${_zstd_path}")
 
 find_path (ZSTD_INCLUDE_DIR zstd.h HINTS
         ${_zstd_path}
