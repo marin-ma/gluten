@@ -273,8 +273,6 @@ object GlutenConfig {
   val S3_IAM_ROLE_SESSION_NAME = "fs.s3a.iam.role.session.name"
   val SPARK_S3_IAM_SESSION_NAME: String = HADOOP_PREFIX + S3_IAM_ROLE_SESSION_NAME
 
-  val GLUTEN_SHUFFLE_SUPPORTED_CODEC: Set[String] =
-    Set("lz4", "zstd", "snappy") // "SNAPPY" is only valid for CH backend.
   // Hardware acceleraters backend
   val GLUTEN_SHUFFLE_CODEC_BACKEND = "spark.gluten.sql.columnar.shuffle.codecBackend"
   // QAT config
@@ -717,8 +715,6 @@ object GlutenConfig {
           "the supported codec is gzip.")
       .stringConf
       .transform(_.toLowerCase(Locale.ROOT))
-      .checkValues(
-        GLUTEN_SHUFFLE_SUPPORTED_CODEC ++ GLUTEN_QAT_SUPPORTED_CODEC ++ GLUTEN_IAA_SUPPORTED_CODEC)
       .createOptional
 
   val COLUMNAR_SHUFFLE_CODEC_BACKEND =
