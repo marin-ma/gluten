@@ -161,6 +161,7 @@ class QatDevice {
   QatDevice() {
     if (QZSTD_startQatDevice() == QZSTD_FAIL) {
       ARROW_LOG(WARNING) << "QZSTD_startQatDevice failed";
+    } else {
       initialized_ = true;
     }
   }
@@ -180,13 +181,10 @@ class QatDevice {
     return initialized_;
   }
 
-  QatDevice(const QatDevice&) = delete;
-  QatDevice& operator=(const QatDevice&) = delete;
-
  private:
   inline static std::shared_ptr<QatDevice> instance_;
   inline static std::once_flag initQat_;
-  bool initialized_;
+  bool initialized_{false};
 };
 
 class QatZstdCodec final : public arrow::util::Codec {
