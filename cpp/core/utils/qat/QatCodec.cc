@@ -158,6 +158,39 @@ void logZstdOnError(size_t ret, const char* prefixMsg) {
 
 enum QatState { kQatNotStarted, kQatSuccess, kQatFail };
 
+class QatDevice {
+ public:
+  QatDevice() {
+    if (QZSTD_startQatDevice() == QZSTD_FAIL) {
+      ARROW_LOG(WARNING) << "QZSTD_startQatDevice failed";
+      initialized_ = true;
+    }
+  }
+
+  ~QatDevice() {
+    if (initialized_) {
+      QZSTD_stopQatDevice();
+    }
+  }
+
+  static std::shared_ptr<QatDevice> getInstance() {
+    std::call_once(initQat_, []() { instance_ = std::make_shared<QatDevice>(); });
+    return instance_;
+  }
+
+  bool deviceInitialized() {
+    return initialized_;
+  }
+
+  QatDevice(const QatDevice&) = delete;
+  QatDevice& operator=(const QatDevice&) = delete;
+
+ private:
+  inline static std::shared_ptr<QatDevice> instance_;
+  inline static std::once_flag initQat_;
+  bool initialized_;
+};
+
 class QatZstdCodec final : public arrow::util::Codec {
  public:
   explicit QatZstdCodec(int compressionLevel) : compressionLevel_(compressionLevel) {}
@@ -165,17 +198,8 @@ class QatZstdCodec final : public arrow::util::Codec {
   ~QatZstdCodec() {
     if (initCCtx_) {
       ZSTD_freeCCtx(zc_);
-      if (deviceStarted_ == kQatSuccess) {
+      if (sequenceProducerState_) {
         QZSTD_freeSeqProdState(sequenceProducerState_);
-        {
-          std::lock_guard<std::mutex> lock(mtx_);
-          if (--aliveThreads_ == 0) {
-            /* Free sequence producer state */
-            /* Please call QZSTD_stopQatDevice before
-            QAT is no longer used or the process exits */
-            QZSTD_stopQatDevice();
-          }
-        }
       }
     }
   }
@@ -245,55 +269,33 @@ class QatZstdCodec final : public arrow::util::Codec {
   ZSTD_CCtx* zc_;
   bool initCCtx_{false};
 
+  std::shared_ptr<QatDevice> qatDevice_;
   void* sequenceProducerState_;
-
-  static std::mutex mtx_;
-  static int aliveThreads_;
-  static QatState deviceStarted_;
 
   arrow::Status initCCtx() {
     if (initCCtx_) {
       return arrow::Status::OK();
     }
-
     zc_ = ZSTD_createCCtx();
     logZstdOnError(
         ZSTD_CCtx_setParameter(zc_, ZSTD_c_compressionLevel, compressionLevel_),
         "ZSTD_CCtx_setParameter failed on ZSTD_c_compressionLevel: ");
-    {
-      std::lock_guard<std::mutex> lock(mtx_);
-      /* Start QAT device, start QAT device at any
-      time before compression job started */
-      if (deviceStarted_ != kQatFail) {
-        if (aliveThreads_++ == 0) {
-          if (QZSTD_startQatDevice() == QZSTD_FAIL) {
-            ARROW_LOG(WARNING) << "QZSTD_startQatDevice failed";
-            deviceStarted_ = kQatFail;
-            --aliveThreads_;
-          } else {
-            deviceStarted_ = kQatSuccess;
-          }
-        }
-        if (deviceStarted_ == kQatSuccess) {
-          /* Create sequence producer state for QAT sequence producer */
-          sequenceProducerState_ = QZSTD_createSeqProdState();
-          /* register qatSequenceProducer */
-          ZSTD_registerSequenceProducer(zc_, sequenceProducerState_, qatSequenceProducer);
-          /* Enable sequence producer fallback */
-          logZstdOnError(
-              ZSTD_CCtx_setParameter(zc_, ZSTD_c_enableSeqProducerFallback, 1),
-              "ZSTD_CCtx_setParameter failed on  ZSTD_c_enableSeqProducerFallback");
-        }
-      }
+    if (!qatDevice_) {
+      qatDevice_ = QatDevice::getInstance();
+    }
+    if (qatDevice_->deviceInitialized()) {
+      sequenceProducerState_ = QZSTD_createSeqProdState();
+      /* register qatSequenceProducer */
+      ZSTD_registerSequenceProducer(zc_, sequenceProducerState_, qatSequenceProducer);
+      /* Enable sequence producer fallback */
+      logZstdOnError(
+          ZSTD_CCtx_setParameter(zc_, ZSTD_c_enableSeqProducerFallback, 1),
+          "ZSTD_CCtx_setParameter failed on  ZSTD_c_enableSeqProducerFallback");
     }
     initCCtx_ = true;
     return arrow::Status::OK();
   }
 };
-
-std::mutex QatZstdCodec::mtx_;
-int QatZstdCodec::aliveThreads_;
-QatState QatZstdCodec::deviceStarted_{kQatNotStarted};
 
 std::unique_ptr<arrow::util::Codec> makeQatZstdCodec(int compressionLevel) {
   return std::unique_ptr<arrow::util::Codec>(new QatZstdCodec(compressionLevel));
