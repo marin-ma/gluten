@@ -156,8 +156,6 @@ void logZstdOnError(size_t ret, const char* prefixMsg) {
 
 } // namespace
 
-enum QatState { kQatNotStarted, kQatSuccess, kQatFail };
-
 class QatDevice {
  public:
   QatDevice() {
@@ -270,7 +268,7 @@ class QatZstdCodec final : public arrow::util::Codec {
   bool initCCtx_{false};
 
   std::shared_ptr<QatDevice> qatDevice_;
-  void* sequenceProducerState_;
+  void* sequenceProducerState_{nullptr};
 
   arrow::Status initCCtx() {
     if (initCCtx_) {
@@ -290,7 +288,7 @@ class QatZstdCodec final : public arrow::util::Codec {
       /* Enable sequence producer fallback */
       logZstdOnError(
           ZSTD_CCtx_setParameter(zc_, ZSTD_c_enableSeqProducerFallback, 1),
-          "ZSTD_CCtx_setParameter failed on  ZSTD_c_enableSeqProducerFallback");
+          "ZSTD_CCtx_setParameter failed on  ZSTD_c_enableSeqProducerFallback: ");
     }
     initCCtx_ = true;
     return arrow::Status::OK();
