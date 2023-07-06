@@ -18,7 +18,6 @@
 package org.apache.spark.shuffle
 
 import io.glutenproject.GlutenConfig
-import io.glutenproject.backendsapi.BackendsApiManager
 
 import org.apache.spark.SparkConf
 import org.apache.spark.internal.config._
@@ -43,21 +42,13 @@ object GlutenShuffleUtils {
           checkCodecValues(glutenCodecKey, codec, GlutenConfig.GLUTEN_QAT_SUPPORTED_CODEC)
         } else if (glutenConfig.columnarShuffleEnableIaa) {
           checkCodecValues(glutenCodecKey, codec, GlutenConfig.GLUTEN_IAA_SUPPORTED_CODEC)
-        } else {
-          checkCodecValues(
-            glutenCodecKey,
-            codec,
-            BackendsApiManager.getSettings.shuffleSupportedCodec())
         }
         codec
       case None =>
         val sparkCodecKey = IO_COMPRESSION_CODEC.key
         val codec =
           conf.get(sparkCodecKey, IO_COMPRESSION_CODEC.defaultValueString)
-        checkCodecValues(
-          sparkCodecKey,
-          codec,
-          BackendsApiManager.getSettings.shuffleSupportedCodec())
+        checkCodecValues(sparkCodecKey, codec, GlutenConfig.GLUTEN_SHUFFLE_SUPPORTED_CODEC)
         codec
     }
   }
