@@ -329,11 +329,13 @@ void VeloxInitializer::initHWAccelerators(const std::unordered_map<std::string, 
 #ifdef GLUTEN_ENABLE_IAA
     if (got->second == kIaaBackendName) {
       got = conf.find(kShuffleCompressionCodec);
-      if (got != conf.end() && gluten::qpl::SupportsCodec(got->second)) {
+      if (got != conf.end() && gluten::qpl::supportsCodec(got->second)) {
         gluten::qpl::EnsureQplCodecRegistered(got->second);
       }
     }
 #endif
+  } else {
+    std::cout << "Shuffle codec not found" << std::endl;
   }
 }
 

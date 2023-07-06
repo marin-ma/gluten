@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# ZSTD_HOME environmental variable is used to check for Zstd headers and static library
+# ZSTDLIB environmental variable is used to check for Zstd headers and static library
 
 # ZSTD_INCLUDE_DIR: directory containing headers
 # ZSTD_LIBRARY: path to libzstd.so

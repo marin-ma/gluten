@@ -31,7 +31,7 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.util.{SparkDirectoryUtil, SparkResourcesUtil, Utils}
 
 import java.io.IOException
-import java.util.UUID
+import java.util.{Locale, UUID}
 
 class ColumnarShuffleWriter[K, V](
     shuffleBlockResolver: IndexShuffleBlockResolver,

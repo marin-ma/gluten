@@ -31,6 +31,9 @@ public abstract class JniInitialized {
     String prefix = BackendsApiManager.getSettings().getBackendConfigPrefix();
     Map<String, String> nativeConfMap = GlutenConfig.getNativeBackendConf(
         prefix, SQLConf.get().getAllConfs());
+    for (Map.Entry<String, String> entry: nativeConfMap.entrySet()) {
+      System.out.println("Key: " + entry.getKey() + ", Value: " + entry.getValue());
+    }
     InitializerJniWrapper.initialize(JniUtils.toNativeConf(nativeConfMap));
   }
 
