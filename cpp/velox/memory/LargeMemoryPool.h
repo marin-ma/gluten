@@ -60,7 +60,6 @@ class LargeMemoryPool : public arrow::MemoryPool {
   };
 
   std::vector<BufferAllocated> buffers_;
-  std::vector<BufferAllocated> freedBuffers_;
 
   MemoryPool* delegated_;
 };

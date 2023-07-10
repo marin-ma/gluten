@@ -31,24 +31,16 @@ arrow::Status LargeMemoryPool::Allocate(int64_t size, int64_t alignment, uint8_t
   // make sure the size is cache line size aligned
   size = ROUND_TO_LINE(size, alignment);
   if (buffers_.empty() || size > buffers_.back().size - buffers_.back().allocated) {
-    // Search in freed_buffers
-    auto freedIt = std::find_if(
-        freedBuffers_.begin(), freedBuffers_.end(), [size](BufferAllocated& buf) { return size <= buf.size; });
-    if (freedIt != freedBuffers_.end()) {
-      buffers_.push_back({freedIt->startAddr, freedIt->startAddr, freedIt->size, 0, 0});
-      freedBuffers_.erase(freedIt);
-    } else {
-      // Allocate new page. Align to kHugePageSize.
-      uint64_t allocSize = size > kLargeBufferSize ? ROUND_TO_LINE(size, kHugePageSize) : kLargeBufferSize;
+    // Allocate new page. Align to kHugePageSize.
+    uint64_t allocSize = size > kLargeBufferSize ? ROUND_TO_LINE(size, kHugePageSize) : kLargeBufferSize;
 
-      uint8_t* allocAddr;
-      RETURN_NOT_OK(doAlloc(allocSize, kHugePageSize, &allocAddr));
-      if (!allocAddr) {
-        return arrow::Status::Invalid("doAlloc failed.");
-      }
-      madvise(allocAddr, size, MADV_WILLNEED);
-      buffers_.push_back({allocAddr, allocAddr, allocSize, 0, 0});
+    uint8_t* allocAddr;
+    RETURN_NOT_OK(doAlloc(allocSize, kHugePageSize, &allocAddr));
+    if (!allocAddr) {
+      return arrow::Status::Invalid("doAlloc failed.");
     }
+    madvise(allocAddr, size, MADV_WILLNEED);
+    buffers_.push_back({allocAddr, allocAddr, allocSize, 0, 0});
   }
   auto& last = buffers_.back();
   *out = last.startAddr + last.allocated;
@@ -70,7 +62,7 @@ void LargeMemoryPool::Free(uint8_t* buffer, int64_t size, int64_t alignment) {
   ARROW_CHECK_NE(its, buffers_.end());
   its->freed += size;
   if (its->freed && its->freed == its->allocated) {
-    freedBuffers_.push_back(*its);
+    doFree(its->startAddr, its->size);
     buffers_.erase(its);
   }
 }
@@ -105,12 +97,8 @@ arrow::Status LargeMemoryPool::Reallocate(int64_t oldSize, int64_t newSize, int6
 }
 
 int64_t LargeMemoryPool::bytes_allocated() const {
-  auto used = std::accumulate(
-      buffers_.begin(), buffers_.end(), 0LL, [](uint64_t size, const BufferAllocated& buf) { return size + buf.size; });
   return std::accumulate(
-      freedBuffers_.begin(), freedBuffers_.end(), used, [](uint64_t size, const BufferAllocated& buf) {
-        return size + buf.size;
-      });
+      buffers_.begin(), buffers_.end(), 0LL, [](uint64_t size, const BufferAllocated& buf) { return size + buf.size; });
 }
 
 int64_t LargeMemoryPool::max_memory() const {
@@ -138,14 +126,10 @@ void LargeMemoryPool::doFree(uint8_t* buffer, int64_t size) {
 }
 
 LargeMemoryPool::~LargeMemoryPool() {
-  std::for_each(
-      freedBuffers_.begin(), freedBuffers_.end(), [this](BufferAllocated& buf) { doFree(buf.startAddr, buf.size); });
   ARROW_CHECK(buffers_.size() == 0);
 }
 
 MMapMemoryPool::~MMapMemoryPool() {
-  std::for_each(
-      freedBuffers_.begin(), freedBuffers_.end(), [this](BufferAllocated& buf) { doFree(buf.startAddr, buf.size); });
   ARROW_CHECK(buffers_.size() == 0);
 }
 
