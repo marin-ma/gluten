@@ -23,3 +23,8 @@ macro(package_add_gbenchmark TESTNAME)
 endmacro()
 
 package_add_gbenchmark(BenchmarkCompression CompressionBenchmark.cc)
+
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../CMake" ${CMAKE_MODULE_PATH})
+include(FindZstd)
+package_add_gbenchmark(BenchmarkCompression2 CompressionBenchmark2.cc)
+target_link_libraries(BenchmarkCompression2 ${ZSTD_LIBRARY} lz4)
