@@ -82,6 +82,7 @@ auto BM_Generic = [](::benchmark::State& state,
   auto plan = getPlanFromFile(filePath);
   auto startTime = std::chrono::steady_clock::now();
   int64_t collectBatchTime = 0;
+  int64_t shuffleSplitTime = 0;
 
   for (auto _ : state) {
     auto backend = gluten::createBackend();
@@ -103,11 +104,13 @@ auto BM_Generic = [](::benchmark::State& state,
         gluten::defaultMemoryAllocator().get(), "/tmp/test-spill", std::move(inputIters), conf);
     auto veloxPlan = std::dynamic_pointer_cast<gluten::VeloxBackend>(backend)->getVeloxPlan();
     if (FLAGS_with_shuffle) {
+      TIME_NANO_START(shuffleSplitTime);
       const auto& shuffleWriter = createShuffleWriter();
       while (resultIter->hasNext()) {
         GLUTEN_THROW_NOT_OK(shuffleWriter->split(resultIter->next()));
       }
       GLUTEN_THROW_NOT_OK(shuffleWriter->stop());
+      TIME_NANO_END(shuffleSplitTime);
     } else {
       // May write the output into file.
       ArrowSchema cSchema;
@@ -157,6 +160,8 @@ auto BM_Generic = [](::benchmark::State& state,
 
   state.counters["collect_batch_time"] =
       benchmark::Counter(collectBatchTime, benchmark::Counter::kAvgIterations, benchmark::Counter::OneK::kIs1000);
+  state.counters["shuffle_split_time"] =
+      benchmark::Counter(shuffleSplitTime, benchmark::Counter::kAvgIterations, benchmark::Counter::OneK::kIs1000);
   state.counters["elapsed_time"] =
       benchmark::Counter(duration, benchmark::Counter::kAvgIterations, benchmark::Counter::OneK::kIs1000);
 };
