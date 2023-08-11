@@ -159,7 +159,9 @@ bool SubstraitToVeloxPlanValidator::validateScalarFunction(
       return false;
     }
     const auto& pattern = patternArg.literal().string();
-    if (!validatePattern(pattern)) {
+    std::string error;
+    if (!validatePattern(pattern, error)) {
+      logValidateMsg(error);
       return false;
     }
   }
