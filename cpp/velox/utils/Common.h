@@ -26,6 +26,6 @@ namespace gluten {
 // Compile the given pattern and return the RE2 object.
 inline std::unique_ptr<re2::RE2> compilePattern(const std::string& pattern);
 
-bool validatePattern(const std::string& pattern);
+bool validatePattern(const std::string& pattern, std::string& error);
 
 } // namespace gluten
