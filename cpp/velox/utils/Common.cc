@@ -23,4 +23,14 @@ std::unique_ptr<re2::RE2> compilePattern(const std::string& pattern) {
   return std::make_unique<re2::RE2>(re2::StringPiece(pattern), RE2::Quiet);
 }
 
+bool validatePattern(const std::string& pattern) {
+  auto re2 = compilePattern(pattern);
+  if (!re2->ok()) {
+    logValidateMsg(
+        "native validation failed due to: pattern " + pattern + " compilation failed in RE2. Reason: " + re2->error());
+    return false;
+  }
+  return true;
+}
+
 } // namespace gluten
