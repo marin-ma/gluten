@@ -287,6 +287,7 @@ std::unordered_map<std::string, std::string> WholeStageResultIterator::getQueryC
   try {
     // To align with Spark's behavior, set casting to int to be truncating.
     configs[velox::core::QueryConfig::kCastToIntByTruncate] = std::to_string(true);
+    configs[velox::core::QueryConfig::kCastStringToDateNonStandard] = std::to_string(true);
     configs[velox::core::QueryConfig::kSessionTimezone] = getConfigValue(confMap_, kSessionTimezone, "");
     // Adjust timestamp according to the above configured session timezone.
     configs[velox::core::QueryConfig::kAdjustTimestampToTimezone] = std::to_string(true);
