@@ -186,7 +186,7 @@ class PosExplodeTransformer(
   }
 }
 
-class PromotePrecisionTransformer(child: ExpressionTransformer, original: PromotePrecision)
+case class PromotePrecisionTransformer(child: ExpressionTransformer, original: PromotePrecision)
   extends ExpressionTransformer
   with Logging {
 
@@ -195,7 +195,7 @@ class PromotePrecisionTransformer(child: ExpressionTransformer, original: Promot
   }
 }
 
-class CheckOverflowTransformer(
+case class CheckOverflowTransformer(
     substraitExprName: String,
     child: ExpressionTransformer,
     original: CheckOverflow)

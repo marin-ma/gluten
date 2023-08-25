@@ -519,15 +519,22 @@ object ExpressionConverter extends SQLConfHelper with Logging {
             DecimalArithmeticUtil.removeCastForDecimal(rescaleBinary.left),
             DecimalArithmeticUtil.removeCastForDecimal(rescaleBinary.right))
         }
+        val leftChild = replaceWithExpressionTransformer(left, attributeSeq)
+        val rightChild = replaceWithExpressionTransformer(right, attributeSeq)
+
         val resultType = DecimalArithmeticUtil.getResultTypeForOperation(
           DecimalArithmeticUtil.getOperationType(b.asInstanceOf[BinaryArithmetic]),
-          left.dataType.asInstanceOf[DecimalType],
-          right.dataType.asInstanceOf[DecimalType]
+          DecimalArithmeticUtil
+            .getResultType(leftChild)
+            .getOrElse(left.dataType.asInstanceOf[DecimalType]),
+          DecimalArithmeticUtil
+            .getResultType(rightChild)
+            .getOrElse(right.dataType.asInstanceOf[DecimalType])
         )
-        new DecimalArithmeticExpressionTransformer(
+        DecimalArithmeticExpressionTransformer(
           substraitExprName.get,
-          replaceWithExpressionTransformer(left, attributeSeq),
-          replaceWithExpressionTransformer(right, attributeSeq),
+          leftChild,
+          rightChild,
           resultType,
           b)
       case b: BinaryExpression =>

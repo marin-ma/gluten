@@ -113,7 +113,7 @@ object BinaryExpressionTransformer {
   }
 }
 
-class DecimalArithmeticExpressionTransformer(
+case class DecimalArithmeticExpressionTransformer(
     substraitExprName: String,
     left: ExpressionTransformer,
     right: ExpressionTransformer,
