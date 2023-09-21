@@ -19,6 +19,7 @@
 #include <glog/logging.h>
 #include <thread>
 #include "shuffle/Utils.h"
+#include "utils/Timer.h"
 
 namespace gluten {
 
@@ -100,13 +101,13 @@ arrow::Status PreferCachePartitionWriter::spill() {
 }
 
 arrow::Status PreferCachePartitionWriter::stop() {
-  int64_t totalWriteTime = 0;
   int64_t totalBytesEvicted = 0;
   int64_t totalBytesWritten = 0;
-  int64_t lastPayloadCompressTime = 0;
   auto numPartitions = shuffleWriter_->numPartitions();
 
-  TIME_NANO_START(totalWriteTime)
+  auto writeTimer = Timer();
+  writeTimer.start();
+
   // Open final file.
   // If options_.buffered_write is set, it will acquire 16KB memory that might trigger spill.
   RETURN_NOT_OK(openDataFile());
@@ -144,9 +145,9 @@ arrow::Status PreferCachePartitionWriter::stop() {
       RETURN_NOT_OK(flushCachedPayloads(pid, dataFileOs_.get()));
     }
     // Write the last payload.
-    TIME_NANO_START(lastPayloadCompressTime)
+    writeTimer.stop();
     ARROW_ASSIGN_OR_RAISE(auto lastPayload, shuffleWriter_->createPayloadFromBuffer(pid, false));
-    TIME_NANO_END(lastPayloadCompressTime)
+    writeTimer.start();
     if (lastPayload) {
       firstWrite = false;
       int32_t metadataLength = 0; // unused
@@ -174,9 +175,9 @@ arrow::Status PreferCachePartitionWriter::stop() {
 
   ARROW_ASSIGN_OR_RAISE(totalBytesWritten, dataFileOs_->Tell());
 
-  TIME_NANO_END(totalWriteTime)
+  writeTimer.stop();
 
-  shuffleWriter_->setTotalWriteTime(totalWriteTime - lastPayloadCompressTime);
+  shuffleWriter_->setTotalWriteTime(writeTimer.realTimeUsed());
   shuffleWriter_->setTotalBytesEvicted(totalBytesEvicted);
   shuffleWriter_->setTotalBytesWritten(totalBytesWritten);
 
