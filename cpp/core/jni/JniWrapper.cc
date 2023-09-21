@@ -32,6 +32,7 @@
 #include "operators/serializer/ColumnarBatchSerializer.h"
 #include "shuffle/LocalPartitionWriter.h"
 #include "shuffle/PartitionWriterCreator.h"
+#include "shuffle/Partitioning.h"
 #include "shuffle/ShuffleReader.h"
 #include "shuffle/ShuffleWriter.h"
 #include "shuffle/Utils.h"
@@ -820,7 +821,7 @@ JNIEXPORT jlong JNICALL Java_io_glutenproject_vectorized_ShuffleWriterJniWrapper
   auto partitioningName = jStringToCString(env, partitioningNameJstr);
 
   auto shuffleWriterOptions = ShuffleWriterOptions::defaults();
-  shuffleWriterOptions.partitioning_name = partitioningName;
+  shuffleWriterOptions.partitioning = gluten::toPartitioning(partitioningName);
   shuffleWriterOptions.buffered_write = true;
   if (bufferSize > 0) {
     shuffleWriterOptions.buffer_size = bufferSize;

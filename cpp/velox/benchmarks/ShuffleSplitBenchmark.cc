@@ -117,7 +117,7 @@ class BenchmarkShuffleSplit {
     options.buffer_size = kPartitionBufferSize;
     options.buffered_write = true;
     options.memory_pool = pool;
-    options.partitioning_name = "rr";
+    options.partitioning = Partitioning::kRoundRobin;
 
     std::shared_ptr<VeloxShuffleWriter> shuffleWriter;
     int64_t elapseRead = 0;

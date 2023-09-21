@@ -20,9 +20,9 @@
 #include "shuffle/Partitioner.h"
 
 namespace gluten {
-class SinglePartPartitioner final : public ShuffleWriter::Partitioner {
+class SinglePartitioner final : public Partitioner {
  public:
-  SinglePartPartitioner(int32_t numPartitions, bool hasPid) : Partitioner(numPartitions, hasPid) {}
+  SinglePartitioner() : Partitioner(1, false) {}
 
   arrow::Status compute(
       const int32_t* pidArr,
@@ -30,5 +30,4 @@ class SinglePartPartitioner final : public ShuffleWriter::Partitioner {
       std::vector<uint16_t>& row2partition,
       std::vector<uint32_t>& partition2RowCount) override;
 };
-
 } // namespace gluten

@@ -22,6 +22,7 @@
 #include "utils/VeloxArrowUtils.h"
 #include "velox/vector/arrow/Bridge.h"
 
+#include "shuffle/Partitioner.h"
 #include "utils/Common.h"
 #include "utils/compression.h"
 #include "utils/macros.h"
@@ -361,7 +362,7 @@ arrow::Result<std::shared_ptr<VeloxShuffleWriter>> VeloxShuffleWriter::create(
   oss << "Velox shuffle writer created,";
   oss << " partitionNum:" << numPartitions;
   oss << " partitionWriterCreator:" << typeid(*partitionWriterCreator.get()).name();
-  oss << " partitioning_name:" << options.partitioning_name;
+  oss << " partitioning:" << options.partitioning;
   oss << " buffer_size:" << options.buffer_size;
   oss << " compression_type:" << (int)options.compression_type;
   oss << " codec_backend:" << (int)options.codec_backend;
@@ -393,11 +394,11 @@ arrow::Status VeloxShuffleWriter::init() {
   VELOX_CHECK_LE(options_.buffer_size, 32 * 1024);
 
   ARROW_ASSIGN_OR_RAISE(partitionWriter_, partitionWriterCreator_->make(this));
-  ARROW_ASSIGN_OR_RAISE(partitioner_, Partitioner::make(options_.partitioning_name, numPartitions_));
+  ARROW_ASSIGN_OR_RAISE(partitioner_, Partitioner::make(options_.partitioning, numPartitions_));
 
   // pre-allocated buffer size for each partition, unit is row count
   // when partitioner is SinglePart, partial variables don`t need init
-  if (options_.partitioning_name != "single") {
+  if (options_.partitioning != Partitioning::kSingle) {
     partition2RowCount_.resize(numPartitions_);
     partition2BufferSize_.resize(numPartitions_);
     partition2RowOffset_.resize(numPartitions_ + 1);
@@ -542,7 +543,7 @@ std::shared_ptr<arrow::Buffer> VeloxShuffleWriter::generateComplexTypeBuffers(ve
 }
 
 arrow::Status VeloxShuffleWriter::split(std::shared_ptr<ColumnarBatch> cb, int64_t memLimit) {
-  if (options_.partitioning_name == "single") {
+  if (options_.partitioning == Partitioning::kSingle) {
     auto veloxColumnBatch = std::dynamic_pointer_cast<VeloxColumnarBatch>(cb);
     VELOX_DCHECK_NOT_NULL(veloxColumnBatch);
     auto& rv = *veloxColumnBatch->getFlattenedRowVector();
@@ -567,7 +568,7 @@ arrow::Status VeloxShuffleWriter::split(std::shared_ptr<ColumnarBatch> cb, int64
     ARROW_ASSIGN_OR_RAISE(auto payload, createArrowIpcPayload(*rb, false));
     rawPartitionLengths_[0] += payload->raw_body_length;
     RETURN_NOT_OK(partitionWriter_->processPayload(0, std::move(payload)));
-  } else if (options_.partitioning_name == "range") {
+  } else if (options_.partitioning == Partitioning::kRange) {
     auto compositeBatch = std::dynamic_pointer_cast<CompositeColumnarBatch>(cb);
     VELOX_DCHECK_NOT_NULL(compositeBatch);
     auto batches = compositeBatch->getBatches();

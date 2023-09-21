@@ -23,6 +23,8 @@
 
 #include "memory/ArrowMemoryPool.h"
 #include "memory/ColumnarBatch.h"
+#include "shuffle/Partitioner.h"
+#include "shuffle/Partitioning.h"
 #include "utils/compression.h"
 
 namespace gluten {
@@ -59,7 +61,7 @@ struct ShuffleWriterOptions {
 
   arrow::ipc::IpcWriteOptions ipc_write_options = arrow::ipc::IpcWriteOptions::Defaults();
 
-  std::string partitioning_name;
+  Partitioning partitioning;
 
   static ShuffleWriterOptions defaults();
 };
@@ -211,8 +213,6 @@ class ShuffleWriter {
   virtual const uint64_t cachedPayloadSize() const = 0;
 
   class PartitionWriter;
-
-  class Partitioner;
 
   class PartitionWriterCreator;
 

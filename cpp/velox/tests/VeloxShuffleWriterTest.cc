@@ -357,7 +357,7 @@ class VeloxShuffleWriterTest : public ::testing::TestWithParam<ShuffleTestParams
 
 TEST_P(VeloxShuffleWriterTest, singlePart1Vector) {
   shuffleWriterOptions_.buffer_size = 10;
-  shuffleWriterOptions_.partitioning_name = "single";
+  shuffleWriterOptions_.partitioning = Partitioning::kSingle;
   GLUTEN_ASSIGN_OR_THROW(
       auto shuffleWriter, VeloxShuffleWriter::create(1, partitionWriterCreator_, shuffleWriterOptions_, pool_))
 
@@ -366,7 +366,7 @@ TEST_P(VeloxShuffleWriterTest, singlePart1Vector) {
 
 TEST_P(VeloxShuffleWriterTest, singlePart3Vectors) {
   shuffleWriterOptions_.buffer_size = 10;
-  shuffleWriterOptions_.partitioning_name = "single";
+  shuffleWriterOptions_.partitioning = Partitioning::kSingle;
 
   GLUTEN_ASSIGN_OR_THROW(
       auto shuffleWriter, VeloxShuffleWriter::create(1, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -376,7 +376,7 @@ TEST_P(VeloxShuffleWriterTest, singlePart3Vectors) {
 
 TEST_P(VeloxShuffleWriterTest, singlePartCompressSmallBuffer) {
   shuffleWriterOptions_.buffer_size = 10;
-  shuffleWriterOptions_.partitioning_name = "single";
+  shuffleWriterOptions_.partitioning = Partitioning::kSingle;
   shuffleWriterOptions_.compression_type = arrow::Compression::LZ4_FRAME;
   shuffleWriterOptions_.buffer_compress_threshold = 1024;
 
@@ -388,7 +388,7 @@ TEST_P(VeloxShuffleWriterTest, singlePartCompressSmallBuffer) {
 
 TEST_P(VeloxShuffleWriterTest, singlePartNullVector) {
   shuffleWriterOptions_.buffer_size = 10;
-  shuffleWriterOptions_.partitioning_name = "single";
+  shuffleWriterOptions_.partitioning = Partitioning::kSingle;
 
   GLUTEN_ASSIGN_OR_THROW(
       auto shuffleWriter, VeloxShuffleWriter::create(1, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -402,7 +402,7 @@ TEST_P(VeloxShuffleWriterTest, singlePartNullVector) {
 
 TEST_P(VeloxShuffleWriterTest, singlePartOtherType) {
   shuffleWriterOptions_.buffer_size = 10;
-  shuffleWriterOptions_.partitioning_name = "single";
+  shuffleWriterOptions_.partitioning = Partitioning::kSingle;
 
   GLUTEN_ASSIGN_OR_THROW(
       auto shuffleWriter, VeloxShuffleWriter::create(1, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -420,7 +420,7 @@ TEST_P(VeloxShuffleWriterTest, singlePartOtherType) {
 
 TEST_P(VeloxShuffleWriterTest, singlePartComplexType) {
   shuffleWriterOptions_.buffer_size = 10;
-  shuffleWriterOptions_.partitioning_name = "single";
+  shuffleWriterOptions_.partitioning = Partitioning::kSingle;
 
   GLUTEN_ASSIGN_OR_THROW(
       auto shuffleWriter, VeloxShuffleWriter::create(1, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -443,7 +443,7 @@ TEST_P(VeloxShuffleWriterTest, singlePartComplexType) {
 
 TEST_P(VeloxShuffleWriterTest, hashPart1Vector) {
   shuffleWriterOptions_.buffer_size = 4;
-  shuffleWriterOptions_.partitioning_name = "hash";
+  shuffleWriterOptions_.partitioning = Partitioning::kHash;
 
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(2, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -505,7 +505,7 @@ TEST_P(VeloxShuffleWriterTest, hashPart1Vector) {
 
 TEST_P(VeloxShuffleWriterTest, hashPart1VectorComplexType) {
   shuffleWriterOptions_.buffer_size = 4;
-  shuffleWriterOptions_.partitioning_name = "hash";
+  shuffleWriterOptions_.partitioning = Partitioning::kHash;
 
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(2, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -557,7 +557,7 @@ TEST_P(VeloxShuffleWriterTest, hashPart1VectorComplexType) {
 
 TEST_P(VeloxShuffleWriterTest, hashPart3Vectors) {
   shuffleWriterOptions_.buffer_size = 4;
-  shuffleWriterOptions_.partitioning_name = "hash";
+  shuffleWriterOptions_.partitioning = Partitioning::kHash;
 
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(2, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -579,7 +579,7 @@ TEST_P(VeloxShuffleWriterTest, hashPart3Vectors) {
 TEST_P(VeloxShuffleWriterTest, roundRobin) {
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 4;
-  shuffleWriterOptions_.partitioning_name = "rr";
+  shuffleWriterOptions_.partitioning = Partitioning::kRoundRobin;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
@@ -600,7 +600,7 @@ TEST_P(VeloxShuffleWriterTest, roundRobin) {
 TEST_P(VeloxShuffleWriterTest, rangePartition) {
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 4;
-  shuffleWriterOptions_.partitioning_name = "range";
+  shuffleWriterOptions_.partitioning = Partitioning::kRange;
 
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_))
@@ -635,7 +635,7 @@ TEST_P(VeloxShuffleWriterTest, memoryLeak) {
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 4;
   shuffleWriterOptions_.memory_pool = pool;
-  shuffleWriterOptions_.partitioning_name = "rr";
+  shuffleWriterOptions_.partitioning = Partitioning::kRoundRobin;
 
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
@@ -657,7 +657,7 @@ TEST_P(VeloxShuffleWriterTest, spillFailWithOutOfMemory) {
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 4;
   shuffleWriterOptions_.memory_pool = pool;
-  shuffleWriterOptions_.partitioning_name = "rr";
+  shuffleWriterOptions_.partitioning = Partitioning::kRoundRobin;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
@@ -676,7 +676,7 @@ TEST_P(VeloxShuffleWriterTest, TestSpillLargestPartition) {
   shuffleWriterOptions_.buffer_size = 4;
   // shuffleWriterOptions_.memory_pool = pool.get();
   shuffleWriterOptions_.compression_type = arrow::Compression::UNCOMPRESSED;
-  shuffleWriterOptions_.partitioning_name = "rr";
+  shuffleWriterOptions_.partitioning = Partitioning::kRoundRobin;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
@@ -691,7 +691,7 @@ TEST_P(VeloxShuffleWriterTest, TestSpillLargestPartition) {
 TEST_P(VeloxShuffleWriterTest, TestSplitSpillAndShrink) {
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 100; // Set a large buffer size to make sure there are spaces to shrink.
-  shuffleWriterOptions_.partitioning_name = "rr";
+  shuffleWriterOptions_.partitioning = Partitioning::kRoundRobin;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
@@ -713,7 +713,7 @@ TEST_P(VeloxShuffleWriterTest, TestSplitSpillAndShrink) {
 TEST_P(VeloxShuffleWriterTest, TestStopShrinkAndSpill) {
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 100; // Set a large buffer size to make sure there are spaces to shrink.
-  shuffleWriterOptions_.partitioning_name = "rr";
+  shuffleWriterOptions_.partitioning = Partitioning::kRoundRobin;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
@@ -742,7 +742,7 @@ TEST_P(VeloxShuffleWriterTest, TestStopShrinkAndSpill) {
 TEST_P(VeloxShuffleWriterTest, TestSpillOnStop) {
   int32_t numPartitions = 2;
   shuffleWriterOptions_.buffer_size = 100; // Set a large buffer size to make sure there are spaces to shrink.
-  shuffleWriterOptions_.partitioning_name = "rr";
+  shuffleWriterOptions_.partitioning = Partitioning::kRoundRobin;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
@@ -777,7 +777,7 @@ TEST_P(VeloxShuffleWriterTest, TestSpillOnStop) {
 TEST_P(VeloxShuffleWriterTest, TestSpill) {
   int32_t numPartitions = 4;
   shuffleWriterOptions_.buffer_size = 1; // Set a small buffer size to force clear and cache buffers for each split.
-  shuffleWriterOptions_.partitioning_name = "hash";
+  shuffleWriterOptions_.partitioning = Partitioning::kHash;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
@@ -818,7 +818,7 @@ TEST_P(VeloxShuffleWriterTest, TestShrinkZeroSizeBuffer) {
   // 2. partition buffer size after shrink is 0.
   int32_t numPartitions = 200; // Set a large number of partitions to create empty partition buffers.
   shuffleWriterOptions_.buffer_size = 100; // Set a large buffer size to make sure there are spaces to shrink.
-  shuffleWriterOptions_.partitioning_name = "hash";
+  shuffleWriterOptions_.partitioning = Partitioning::kHash;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
   auto evicted = splitRowVectorAndSpill({hashInputVector1_, hashInputVector2_, hashInputVector1_}, true);
@@ -847,7 +847,7 @@ TEST_P(VeloxShuffleWriterTest, TestShrinkZeroSizeBuffer) {
 TEST_P(VeloxShuffleWriterTest, SmallBufferSizeNoShrink) {
   int32_t numPartitions = 4; // Set a large number of partitions to create empty partition buffers.
   shuffleWriterOptions_.buffer_size = 1; // Set a small buffer size to test no space to shrink.
-  shuffleWriterOptions_.partitioning_name = "hash";
+  shuffleWriterOptions_.partitioning = Partitioning::kHash;
   ARROW_ASSIGN_OR_THROW(
       shuffleWriter_, VeloxShuffleWriter::create(numPartitions, partitionWriterCreator_, shuffleWriterOptions_, pool_));
 
