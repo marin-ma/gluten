@@ -235,7 +235,7 @@ class VeloxShuffleWriter final : public ShuffleWriter {
   arrow::Result<std::shared_ptr<arrow::ResizableBuffer>>
   allocateValidityBuffer(uint32_t col, uint32_t partitionId, uint32_t newSize);
 
-  arrow::Status allocatePartitionBuffer(uint32_t partitionId, uint32_t newSize, bool reuseBuffers);
+  arrow::Status allocatePartitionBuffer(uint32_t partitionId, uint32_t newSize);
 
   arrow::Status splitFixedWidthValueBuffer(const facebook::velox::RowVector& rv);
 
@@ -299,9 +299,17 @@ class VeloxShuffleWriter final : public ShuffleWriter {
 
   arrow::Status shrinkPartitionBuffer(uint32_t partitionId);
 
-  arrow::Status resizePartitionBuffer(uint32_t partitionId, int64_t newSize);
+  // Resize the partition buffer to newSize. If preserveData is true, it will keep the data in buffer.
+  // If newSize is smaller, it will shrink the buffer, otherwise necessary memory copy can be introduced during resize.
+  // For the validity buffer, nothing will be done if it's null.
+  //
+  // Note if preserveData is false, and newSize is larger, this function can introduce unnecessary memory copy.
+  // In this case, using allocatePartitionBuffer to free current buffers and allocate new buffers is a better choice.
+  arrow::Status resizePartitionBuffer(uint32_t partitionId, int64_t newSize, bool preserveData);
 
-  uint64_t calculateValueBufferSizeForBinaryArray(uint32_t binaryIdx, int64_t newSize);
+  uint64_t valueBufferSizeForBinaryArray(uint32_t binaryIdx, int64_t newSize);
+
+  uint64_t valueBufferSizeForFixedWidthArray(uint32_t fixedWidthIdx, int64_t newSize);
 
   void calculateSimpleColumnBytes();
 
