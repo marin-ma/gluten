@@ -75,8 +75,6 @@ class ColumnarShuffleWriter[K, V](
   private val bufferCompressThreshold =
     GlutenConfig.getConf.columnarShuffleBufferCompressThreshold
 
-  private val preferSpill = GlutenConfig.getConf.columnarShufflePreferSpill
-
   private val writeEOS = GlutenConfig.getConf.columnarShuffleWriteEOS
 
   private lazy val executionCtxHandle: Long = ExecutionCtxs.contextInstance().getHandle
@@ -135,7 +133,6 @@ class ColumnarShuffleWriter[K, V](
             dataTmp.getAbsolutePath,
             blockManager.subDirsPerLocalDir,
             localDirs,
-            preferSpill,
             executionCtxHandle,
             NativeMemoryManagers
               .create(
