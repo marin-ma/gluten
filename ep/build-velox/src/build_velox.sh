@@ -233,6 +233,20 @@ function setup_linux {
       exit 1
       ;;
     esac
+  elif [[ "$LINUX_DISTRIBUTION" == "rhel" ]]; then
+    case "$LINUX_VERSION_ID" in
+    8.6)
+      set +u
+      source /opt/rh/gcc-toolset-9/enable
+      export CPLUS_INCLUDE_PATH=/usr/include/python3.6m
+      set -u
+      scripts/setup-centos8.sh
+      ;;
+    *)
+      echo "Unsupport rhel version: $LINUX_VERSION_ID"
+      exit 1
+      ;;
+    esac
   else
     echo "Unsupport linux distribution: $LINUX_DISTRIBUTION"
     exit 1
@@ -269,3 +283,4 @@ compile
 
 echo "Successfully built Velox from Source."
 echo $TARGET_BUILD_COMMIT >"${VELOX_HOME}/velox-commit.cache"
+

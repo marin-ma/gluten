@@ -155,6 +155,14 @@ function process_setup_tencentos32 {
   sed -i "s/.*dnf config-manager --set-enabled powertools/#&/" scripts/setup-centos8.sh
 }
 
+function process_setup_rhel8 {
+  process_setup_centos8
+  sed -i "s/.*dnf config-manager --set-enabled powertools/dnf install -y python3-devel/" scripts/setup-centos8.sh
+  if [[ $BUILD_PROTOBUF == "ON" ]] || [[ $ENABLE_HDFS == "ON" ]]; then
+    sed -i '/install_protobuf$/a \ \ ldconfig' scripts/setup-centos8.sh
+  fi
+}
+
 echo "Preparing Velox source code..."
 echo "ENABLE_HDFS=${ENABLE_HDFS}"
 echo "BUILD_PROTOBUF=${BUILD_PROTOBUF}"
@@ -225,6 +233,14 @@ function setup_linux {
         exit 1
       ;;
     esac
+  elif [[ "$LINUX_DISTRIBUTION" == "rhel" ]]; then
+    case "$LINUX_VERSION_ID" in
+      8.6) process_setup_rhel8 ;;
+      *)
+        echo "Unsupport rhel version: $LINUX_VERSION_ID"
+        exit 1
+      ;;
+    esac
   else
     echo "Unsupport linux distribution: $LINUX_DISTRIBUTION"
     exit 1
@@ -254,3 +270,4 @@ else
 fi
 
 echo "Velox-get finished."
+
