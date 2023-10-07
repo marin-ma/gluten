@@ -56,6 +56,6 @@ arrow::Result<std::vector<std::shared_ptr<arrow::DataType>>> toShuffleWriterType
 
 int64_t getBufferSizes(const std::shared_ptr<arrow::Array>& array);
 
-arrow::Status writeEos(arrow::io::OutputStream* os);
+arrow::Status writeEos(arrow::io::OutputStream* os, int64_t* bytes);
 
 } // namespace gluten

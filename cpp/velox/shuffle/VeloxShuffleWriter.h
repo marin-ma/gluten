@@ -260,9 +260,7 @@ class VeloxShuffleWriter final : public ShuffleWriter {
       uint32_t partitionId,
       bool reuseBuffers);
 
-  arrow::Result<std::unique_ptr<arrow::ipc::IpcPayload>> createArrowIpcPayload(
-      const arrow::RecordBatch& rb,
-      bool reuseBuffers);
+  arrow::Result<std::unique_ptr<arrow::ipc::IpcPayload>> createPayload(const arrow::RecordBatch& rb, bool reuseBuffers);
 
   template <typename T>
   arrow::Status splitFixedType(const uint8_t* srcAddr, const std::vector<uint8_t*>& dstAddrs) {
@@ -293,11 +291,17 @@ class VeloxShuffleWriter final : public ShuffleWriter {
 
   arrow::Status resetValidityBuffer(uint32_t partitionId);
 
+  arrow::Result<int64_t> shrinkOrEvictPartitionBuffers(int64_t size);
+
+  arrow::Result<int64_t> shrinkPartitionBuffersMinSize(int64_t size);
+
   arrow::Result<int64_t> shrinkPartitionBuffers();
 
-  arrow::Status resetPartitionBuffer(uint32_t partitionId);
+  arrow::Result<int64_t> evictPartitionBuffers(int64_t size);
 
   arrow::Status shrinkPartitionBuffer(uint32_t partitionId);
+
+  arrow::Status resetPartitionBuffer(uint32_t partitionId);
 
   arrow::Status resizePartitionBuffer(uint32_t partitionId, int64_t newSize);
 
