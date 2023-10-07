@@ -281,7 +281,7 @@ class VeloxShuffleWriter final : public ShuffleWriter {
       const facebook::velox::FlatVector<facebook::velox::StringView>& src,
       std::vector<BinaryBuf>& dst);
 
-  arrow::Status evictPartitionsOnDemand(int64_t* size);
+  arrow::Result<int64_t> evictCachedPayload();
 
   std::shared_ptr<arrow::RecordBatch> makeRecordBatch(
       uint32_t numRows,
@@ -297,7 +297,7 @@ class VeloxShuffleWriter final : public ShuffleWriter {
 
   arrow::Result<int64_t> shrinkPartitionBuffers();
 
-  arrow::Result<int64_t> evictPartitionBuffers(int64_t size);
+  arrow::Result<int64_t> evictPartitionBuffersMinSize(int64_t size);
 
   arrow::Status shrinkPartitionBuffer(uint32_t partitionId);
 
@@ -315,7 +315,7 @@ class VeloxShuffleWriter final : public ShuffleWriter {
 
   bool shrinkAfterSpill() const;
 
-  arrow::Result<uint32_t> sizeAfterShrink(uint32_t partitionId) const;
+  arrow::Result<uint32_t> partitionBufferSizeAfterShrink(uint32_t partitionId) const;
 
  protected:
   // Memory Pool used to track memory allocation of Arrow IPC payloads.
