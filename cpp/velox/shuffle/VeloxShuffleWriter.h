@@ -233,11 +233,11 @@ class VeloxShuffleWriter final : public ShuffleWriter {
 
   bool beyondThreshold(uint32_t partitionId, uint64_t newSize);
 
+  arrow::Status preAllocPartitionBuffers(const facebook::velox::RowVector& rv, int64_t memLimit);
+
   uint32_t calculatePartitionBufferSize(const facebook::velox::RowVector& rv, int64_t memLimit);
 
-  arrow::Status preAllocPartitionBuffers(uint32_t preAllocBufferSize);
-
-  arrow::Status updateValidityBuffers(uint32_t partitionId, uint32_t newSize, bool reset);
+  arrow::Status updateValidityBuffers(uint32_t partitionId, uint32_t newSize);
 
   arrow::Result<std::shared_ptr<arrow::ResizableBuffer>>
   allocateValidityBuffer(uint32_t col, uint32_t partitionId, uint32_t newSize);
@@ -297,6 +297,8 @@ class VeloxShuffleWriter final : public ShuffleWriter {
       const std::vector<std::shared_ptr<arrow::Buffer>>& buffers);
 
   std::shared_ptr<arrow::Buffer> generateComplexTypeBuffers(facebook::velox::RowVectorPtr vector);
+
+  arrow::Status resetValidityBuffer(uint32_t partitionId);
 
   arrow::Result<int64_t> shrinkPartitionBuffers();
 
