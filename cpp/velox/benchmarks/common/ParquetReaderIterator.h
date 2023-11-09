@@ -34,7 +34,7 @@ class ParquetReaderIterator : public FileReaderIterator {
         fileReader_->GetRecordBatchReader(arrow::internal::Iota(fileReader_->num_row_groups()), &recordBatchReader_));
 
     auto schema = recordBatchReader_->schema();
-    std::cout << "schema:\n" << schema->ToString() << std::endl;
+    LOG(INFO) << "schema:\n" << schema->ToString();
   }
 
   std::shared_ptr<arrow::Schema> getSchema() override {

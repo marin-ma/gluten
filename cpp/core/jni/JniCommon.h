@@ -52,7 +52,7 @@ static inline void checkException(JNIEnv* env) {
     std::string description =
         jStringToCString(env, (jstring)env->CallStaticObjectMethod(describerClass, describeMethod, t));
     if (env->ExceptionCheck()) {
-      std::cerr << "Fatal: Uncaught Java exception during calling the Java exception describer method! " << std::endl;
+      LOG(WARNING) << "Fatal: Uncaught Java exception during calling the Java exception describer method! ";
     }
     throw gluten::GlutenException("Error during calling Java code from native code: " + description);
   }
@@ -161,7 +161,7 @@ static inline void backtrace() {
   auto size = backtrace(array, 1024);
   char** strings = backtrace_symbols(array, size);
   for (size_t i = 0; i < size; ++i) {
-    std::cout << strings[i] << std::endl;
+    LOG(INFO) << strings[i];
   }
   free(strings);
 }
@@ -229,8 +229,8 @@ class SparkAllocationListener final : public gluten::AllocationListener {
   ~SparkAllocationListener() override {
     JNIEnv* env;
     if (vm_->GetEnv(reinterpret_cast<void**>(&env), jniVersion) != JNI_OK) {
-      std::cerr << "SparkAllocationListener#~SparkAllocationListener(): "
-                << "JNIEnv was not attached to current thread" << std::endl;
+      LOG(WARNING) << "SparkAllocationListener#~SparkAllocationListener(): "
+                   << "JNIEnv was not attached to current thread";
       return;
     }
     env->DeleteGlobalRef(jListenerGlobalRef_);
@@ -329,8 +329,8 @@ class CelebornClient : public RssClient {
   ~CelebornClient() {
     JNIEnv* env;
     if (vm_->GetEnv(reinterpret_cast<void**>(&env), jniVersion) != JNI_OK) {
-      std::cerr << "CelebornClient#~CelebornClient(): "
-                << "JNIEnv was not attached to current thread" << std::endl;
+      LOG(WARNING) << "CelebornClient#~CelebornClient(): "
+                   << "JNIEnv was not attached to current thread";
       return;
     }
     env->DeleteGlobalRef(javaCelebornShuffleWriter_);

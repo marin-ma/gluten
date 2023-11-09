@@ -49,7 +49,6 @@ static const std::unordered_set<std::string> kBlackList = {
     "posexplode",
     "arrays_overlap",
     "approx_percentile"};
-
 } // namespace
 
 bool SubstraitToVeloxPlanValidator::validateInputTypes(

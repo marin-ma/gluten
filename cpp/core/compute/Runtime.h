@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <glog/logging.h>
+
 #include "compute/ProtobufUtils.h"
 #include "compute/ResultIterator.h"
 #include "memory/ArrowMemoryPool.h"

@@ -18,7 +18,6 @@
 #include <jni.h>
 #include <filesystem>
 
-#include <glog/logging.h>
 #include "compute/ProtobufUtils.h"
 #include "compute/Runtime.h"
 #include "config/GlutenConfig.h"
@@ -820,7 +819,7 @@ JNIEXPORT jlong JNICALL Java_io_glutenproject_vectorized_ShuffleWriterJniWrapper
   jobject thread = env->CallStaticObjectMethod(cls, mid);
   checkException(env);
   if (thread == NULL) {
-    std::cerr << "Thread.currentThread() return NULL" << std::endl;
+    LOG(WARNING) << "Thread.currentThread() return NULL";
   } else {
     jmethodID midGetid = getMethodIdOrError(env, cls, "getId", "()J");
     jlong sid = env->CallLongMethod(thread, midGetid);
