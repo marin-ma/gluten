@@ -90,7 +90,9 @@ class MetricsHandler extends MetricsApi with Logging{
       "skippedSplits" -> SQLMetrics.createMetric(sparkContext, "number of skipped splits"),
       "processedSplits" -> SQLMetrics.createMetric(sparkContext, "number of processed splits"),
       "skippedStrides" -> SQLMetrics.createMetric(sparkContext, "number of skipped row groups"),
-      "processedStrides" -> SQLMetrics.createMetric(sparkContext, "number of processed row groups")
+      "processedStrides" -> SQLMetrics.createMetric(sparkContext, "number of processed row groups"),
+      "scanDecompressTime" -> SQLMetrics.createNanoTimingMetric(
+        sparkContext, "total time of scan decompress")
     )
 
   override def genHiveTableScanTransformerMetricsUpdater(
@@ -123,7 +125,9 @@ class MetricsHandler extends MetricsApi with Logging{
       "skippedSplits" -> SQLMetrics.createMetric(sparkContext, "number of skipped splits"),
       "processedSplits" -> SQLMetrics.createMetric(sparkContext, "number of processed splits"),
       "skippedStrides" -> SQLMetrics.createMetric(sparkContext, "number of skipped row groups"),
-      "processedStrides" -> SQLMetrics.createMetric(sparkContext, "number of processed row groups")
+      "processedStrides" -> SQLMetrics.createMetric(sparkContext, "number of processed row groups"),
+      "scanDecompressTime" -> SQLMetrics.createNanoTimingMetric(
+        sparkContext, "total time of scan decompress")
     )
 
 

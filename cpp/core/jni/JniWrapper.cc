@@ -291,7 +291,7 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
   metricsBuilderClass = createGlobalClassReferenceOrError(env, "Lio/glutenproject/metrics/Metrics;");
 
   metricsBuilderConstructor =
-      getMethodIdOrError(env, metricsBuilderClass, "<init>", "([J[J[J[J[J[J[J[J[J[JJ[J[J[J[J[J[J[J[J[J[J[J[J[J[J[J)V");
+      getMethodIdOrError(env, metricsBuilderClass, "<init>", "([J[J[J[J[J[J[J[J[J[JJ[J[J[J[J[J[J[J[J[J[J[J[J[J[J[J[J)V");
 
   serializedColumnarBatchIteratorClass =
       createGlobalClassReferenceOrError(env, "Lio/glutenproject/vectorized/ColumnarBatchInIterator;");
@@ -471,6 +471,7 @@ JNIEXPORT jobject JNICALL Java_io_glutenproject_vectorized_ColumnarBatchOutItera
   auto processedSplits = env->NewLongArray(numMetrics);
   auto skippedStrides = env->NewLongArray(numMetrics);
   auto processedStrides = env->NewLongArray(numMetrics);
+  auto scanDecompressTime = env->NewLongArray(numMetrics);
 
   if (metrics) {
     env->SetLongArrayRegion(inputRows, 0, numMetrics, metrics->inputRows);
@@ -498,6 +499,7 @@ JNIEXPORT jobject JNICALL Java_io_glutenproject_vectorized_ColumnarBatchOutItera
     env->SetLongArrayRegion(processedSplits, 0, numMetrics, metrics->processedSplits);
     env->SetLongArrayRegion(skippedStrides, 0, numMetrics, metrics->skippedStrides);
     env->SetLongArrayRegion(processedStrides, 0, numMetrics, metrics->processedStrides);
+    env->SetLongArrayRegion(scanDecompressTime, 0, numMetrics, metrics->scanDecompressTime);
   }
 
   return env->NewObject(
@@ -528,7 +530,8 @@ JNIEXPORT jobject JNICALL Java_io_glutenproject_vectorized_ColumnarBatchOutItera
       skippedSplits,
       processedSplits,
       skippedStrides,
-      processedStrides);
+      processedStrides,
+      scanDecompressTime);
   JNI_METHOD_END(nullptr)
 }
 

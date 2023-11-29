@@ -8,6 +8,7 @@
 #include "velox/connectors/hive/HiveConnector.h"
 #include "velox/connectors/hive/HiveConnectorSplit.h"
 #include "velox/exec/PlanNodeStats.h"
+#include <iostream>
 
 #ifdef ENABLE_HDFS
 #include <hdfs/hdfs.h>
@@ -48,6 +49,7 @@ const std::string kSkippedSplits = "skippedSplits";
 const std::string kProcessedSplits = "processedSplits";
 const std::string kSkippedStrides = "skippedStrides";
 const std::string kProcessedStrides = "processedStrides";
+const std::string kScanDecompressTime = "scanDecompressTime";
 
 // others
 const std::string kHiveDefaultPartition = "__HIVE_DEFAULT_PARTITION__";
@@ -196,6 +198,7 @@ void WholeStageResultIterator::collectMetrics() {
       metrics_->processedSplits[metricsIdx] = runtimeMetric("sum", entry.second->customStats, kProcessedSplits);
       metrics_->skippedStrides[metricsIdx] = runtimeMetric("sum", entry.second->customStats, kSkippedStrides);
       metrics_->processedStrides[metricsIdx] = runtimeMetric("sum", entry.second->customStats, kProcessedStrides);
+      metrics_->scanDecompressTime[metricsIdx] = runtimeMetric("sum", entry.second->customStats, kScanDecompressTime);
       metricsIdx += 1;
     }
   }
@@ -208,6 +211,9 @@ int64_t WholeStageResultIterator::runtimeMetric(
   if (runtimeStats.size() == 0 || runtimeStats.find(metricId) == runtimeStats.end()) {
     return 0;
   }
+//  if (metricId == kScanDecompressTime) {
+//    std::cout << "Found scan decompress time." << std::endl;
+//  }
   if (metricType == "sum") {
     return runtimeStats.at(metricId).sum;
   }

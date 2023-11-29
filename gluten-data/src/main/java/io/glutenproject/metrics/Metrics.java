@@ -43,6 +43,7 @@ public class Metrics implements IMetrics {
   public long[] processedSplits;
   public long[] skippedStrides;
   public long[] processedStrides;
+  public long[] scanDecompressTime;
   public SingleMetric singleMetric = new SingleMetric();
 
   /**
@@ -74,7 +75,8 @@ public class Metrics implements IMetrics {
       long[] skippedSplits,
       long[] processedSplits,
       long[] skippedStrides,
-      long[] processedStrides) {
+      long[] processedStrides,
+      long[] scanDecompressTime) {
     this.inputRows = inputRows;
     this.inputVectors = inputVectors;
     this.inputBytes = inputBytes;
@@ -101,6 +103,7 @@ public class Metrics implements IMetrics {
     this.processedSplits = processedSplits;
     this.skippedStrides = skippedStrides;
     this.processedStrides = processedStrides;
+    this.scanDecompressTime = scanDecompressTime;
   }
 
   public OperatorMetrics getOperatorMetrics(int index) {
@@ -133,7 +136,8 @@ public class Metrics implements IMetrics {
         skippedSplits[index],
         processedSplits[index],
         skippedStrides[index],
-        processedStrides[index]);
+        processedStrides[index],
+        scanDecompressTime[index]);
   }
 
   public SingleMetric getSingleMetrics() {
