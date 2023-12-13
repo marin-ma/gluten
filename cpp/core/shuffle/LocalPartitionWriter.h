@@ -17,30 +17,16 @@
 
 #pragma once
 
+#include <list>
+
 #include <arrow/filesystem/localfs.h>
 #include <arrow/io/api.h>
 
 #include "shuffle/PartitionWriter.h"
-#include "shuffle/ShuffleWriter.h"
+#include "shuffle/Payload.h"
 #include "utils/macros.h"
 
 namespace gluten {
-
-struct SpillInfo {
-  struct PartitionSpillInfo {
-    uint32_t partitionId{};
-    int64_t length{}; // in Bytes
-  };
-
-  bool empty{true};
-  std::string spilledFile{};
-  std::vector<PartitionSpillInfo> partitionSpillInfos{};
-  std::shared_ptr<arrow::io::MemoryMappedFile> inputStream{};
-
-  int32_t mergePos = 0;
-
-  SpillInfo(std::string spilledFile) : spilledFile(spilledFile) {}
-};
 
 class LocalPartitionWriter : public PartitionWriter {
  public:
@@ -54,10 +40,11 @@ class LocalPartitionWriter : public PartitionWriter {
       uint32_t partitionId,
       uint32_t numRows,
       std::vector<std::shared_ptr<arrow::Buffer>> buffers,
+      const std::vector<bool>* isValidityBuffer,
       bool reuseBuffers,
       Evictor::Type evictType) override;
 
-  arrow::Status finishEvict() override;
+  arrow::Status spill() override;
 
   /// The stop function performs several tasks:
   /// 1. Opens the final data file.
@@ -79,8 +66,6 @@ class LocalPartitionWriter : public PartitionWriter {
   /// In both cases, if the cached payload size doesn't free enough memory,
   /// it will shrink partition buffers to free more memory.
   arrow::Status stop(ShuffleWriterMetrics* metrics) override;
-
-  arrow::Status evictFixedSize(int64_t size, int64_t* actual) override;
 
   class LocalEvictor;
 
@@ -105,7 +90,7 @@ class LocalPartitionWriter : public PartitionWriter {
   bool stopped_{false};
   std::shared_ptr<arrow::fs::LocalFileSystem> fs_{nullptr};
   std::shared_ptr<LocalEvictor> evictor_{nullptr};
-  std::vector<std::shared_ptr<SpillInfo>> spills_{};
+  std::vector<std::unique_ptr<Spill>> spillResults_{};
 
   // configured local dirs for spilled file
   int32_t dirSelection_{0};
@@ -116,7 +101,5 @@ class LocalPartitionWriter : public PartitionWriter {
   int64_t totalBytesWritten_{0};
   std::vector<int64_t> partitionLengths_;
   std::vector<int64_t> rawPartitionLengths_;
-  // Partition id, num rows, partition buffers.
-  std::vector<std::tuple<uint32_t, uint32_t, std::vector<std::shared_ptr<arrow::Buffer>>>> cachedPartitionBuffers_;
 };
 } // namespace gluten

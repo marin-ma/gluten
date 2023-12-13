@@ -49,6 +49,7 @@ struct ShuffleWriterOptions {
   CompressionMode compression_mode = CompressionMode::BUFFER;
   bool buffered_write = kEnableBufferedWrite;
   bool write_eos = kWriteEos;
+  bool supportsMerging = true;
 
   PartitionWriterType partition_writer_type = PartitionWriterType::kLocal;
   Partitioning partitioning = Partitioning::kRoundRobin;

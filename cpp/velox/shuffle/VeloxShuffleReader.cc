@@ -18,10 +18,9 @@
 #include "VeloxShuffleReader.h"
 
 #include <arrow/array/array_binary.h>
-#include <arrow/io/buffered.h>
 
 #include "memory/VeloxColumnarBatch.h"
-#include "shuffle/BlockPayload.h"
+#include "shuffle/Payload.h"
 #include "shuffle/Utils.h"
 #include "utils/Common.h"
 #include "utils/Compression.h"

@@ -15,8 +15,10 @@
  * limitations under the License.
  */
 
-#include "CelebornPartitionWriter.h"
-#include "shuffle/BlockPayload.h"
+#include "shuffle/rss/CelebornPartitionWriter.h"
+#include <numeric>
+
+#include "shuffle/Payload.h"
 #include "shuffle/Utils.h"
 #include "utils/Timer.h"
 
@@ -41,8 +43,8 @@ class CelebornEvictHandle final : public Evictor {
     return arrow::Status::OK();
   }
 
-  arrow::Status finish() override {
-    return arrow::Status::OK();
+  arrow::Result<std::unique_ptr<Spill>> finish() override {
+    return nullptr;
   }
 
  private:
@@ -72,14 +74,15 @@ arrow::Status CelebornPartitionWriter::stop(ShuffleWriterMetrics* metrics) {
   return arrow::Status::OK();
 }
 
-arrow::Status CelebornPartitionWriter::finishEvict() {
-  return evictor_->finish();
+arrow::Status CelebornPartitionWriter::spill() {
+  return arrow::Status::OK();
 }
 
 arrow::Status CelebornPartitionWriter::evict(
     uint32_t partitionId,
     uint32_t numRows,
     std::vector<std::shared_ptr<arrow::Buffer>> buffers,
+    const std::vector<bool>* isValidityBuffer,
     bool reuseBuffers,
     Evictor::Type evictType) {
   rawPartitionLengths_[partitionId] += getBufferSize(buffers);
@@ -87,13 +90,14 @@ arrow::Status CelebornPartitionWriter::evict(
   ARROW_ASSIGN_OR_RAISE(
       auto payload,
       BlockPayload::fromBuffers(
-          numRows, std::move(buffers), options_, payloadPool_.get(), codec_ ? codec_.get() : nullptr, false));
+          codec_ ? Payload::Type::kCompressed : Payload::Type::kUncompressed,
+          numRows,
+          std::move(buffers),
+          isValidityBuffer,
+          payloadPool_.get(),
+          codec_ ? codec_.get() : nullptr,
+          false));
   RETURN_NOT_OK(evictor_->evict(partitionId, std::move(payload)));
-  return arrow::Status::OK();
-}
-
-arrow::Status CelebornPartitionWriter::evictFixedSize(int64_t size, int64_t* actual) {
-  *actual = 0;
   return arrow::Status::OK();
 }
 } // namespace gluten

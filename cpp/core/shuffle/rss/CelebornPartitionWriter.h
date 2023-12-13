@@ -39,14 +39,13 @@ class CelebornPartitionWriter final : public RemotePartitionWriter {
       uint32_t partitionId,
       uint32_t numRows,
       std::vector<std::shared_ptr<arrow::Buffer>> buffers,
+      const std::vector<bool>* isValidityBuffer,
       bool reuseBuffers,
       Evictor::Type evictType /* unused */) override;
 
-  arrow::Status finishEvict() override;
+  arrow::Status spill() override;
 
   arrow::Status stop(ShuffleWriterMetrics* metrics) override;
-
-  arrow::Status evictFixedSize(int64_t size, int64_t* actual) override;
 
  private:
   void init();

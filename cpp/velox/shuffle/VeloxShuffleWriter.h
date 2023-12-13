@@ -318,6 +318,9 @@ class VeloxShuffleWriter final : public ShuffleWriter {
   // store arrow column types
   std::vector<std::shared_ptr<arrow::DataType>> arrowColumnTypes_;
 
+  bool hasComplexType_{false};
+  std::vector<bool> isValidityBuffer_;
+
   // store velox column types
   std::vector<std::shared_ptr<const facebook::velox::Type>> veloxColumnTypes_;
 
