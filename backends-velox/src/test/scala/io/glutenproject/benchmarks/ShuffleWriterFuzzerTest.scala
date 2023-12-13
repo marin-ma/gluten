@@ -52,6 +52,9 @@ class ShuffleWriterFuzzerTest extends VeloxWholeStageTransformerSuite {
       .set("spark.memory.offHeap.enabled", "true")
       .set("spark.memory.offHeap.size", "512MB")
       .set("spark.driver.memory", "4g")
+      .set("spark.gluten.sql.debug", "true")
+      .set("spark.gluten.sql.columnar.backend.velox.glogSeverityLevel", "0")
+      .set("spark.sql.adaptive.enabled", "false")
   }
 
   def executeQuery(sql: String): TestResult = {
@@ -98,9 +101,9 @@ class ShuffleWriterFuzzerTest extends VeloxWholeStageTransformerSuite {
     repeatQuery(AGG_REPARTITION_SQL, 10)
   }
 
-  ignore("reproduce") {
-    val sql = REPARTITION_SQL
-    Seq(0L).foreach {
+  test("reproduce") {
+    val sql = AGG_REPARTITION_SQL
+    Seq[Long](1702447157110L).foreach {
       seed =>
         dataGenerator.reFake(seed)
         logWarning(
