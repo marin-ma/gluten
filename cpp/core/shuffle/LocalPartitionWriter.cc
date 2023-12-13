@@ -103,8 +103,15 @@ class CacheEvictor final : public LocalPartitionWriter::LocalEvictor {
     ScopedTimer timer(evictTime_);
     auto payloads = std::move(partitionCachedPayload_[partitionId]);
     partitionCachedPayload_.erase(partitionId);
+    int32_t numPayloads = 0;
+
+    ARROW_ASSIGN_OR_RAISE(auto startInFinalFile, os->Tell());
     for (auto& payload : payloads) {
       RETURN_NOT_OK(payload->serialize(os));
+      ARROW_ASSIGN_OR_RAISE(auto spillPos, os->Tell());
+      std::cout << "Partition " << partitionId << " cached payload " << numPayloads++ << " of bytes "
+                << spillPos - startInFinalFile << std::endl;
+      startInFinalFile = spillPos;
     }
     return arrow::Status::OK();
   }
@@ -259,6 +266,10 @@ arrow::Status LocalPartitionWriter::stop(ShuffleWriterMetrics* metrics) {
     auto startInFinalFile = endInFinalFile;
     // Iterator over all spilled files.
     RETURN_NOT_OK(mergeSpills(pid));
+    {
+      ARROW_ASSIGN_OR_RAISE(auto spillPos, dataFileOs_->Tell());
+      std::cout << "Parition " << pid << " spilled from file of bytes " << spillPos - startInFinalFile << std::endl;
+    }
     // Write cached batches.
     if (evictor_) {
       RETURN_NOT_OK(evictor_->flushCachedPayloads(pid, dataFileOs_.get()));
@@ -278,7 +289,13 @@ arrow::Status LocalPartitionWriter::stop(ShuffleWriterMetrics* metrics) {
               codec_ ? codec_.get() : nullptr,
               false));
       writeTimer.start();
+
+      ARROW_ASSIGN_OR_RAISE(auto st, dataFileOs_->Tell());
+
       RETURN_NOT_OK(payload->serialize(dataFileOs_.get()));
+
+      ARROW_ASSIGN_OR_RAISE(auto ed, dataFileOs_->Tell());
+      std::cout << "Partition " << pid << " write last buffer of bytes " << ed - st << std::endl;
       cachedPartitionBuffersIter++;
     }
     ARROW_ASSIGN_OR_RAISE(endInFinalFile, dataFileOs_->Tell());
