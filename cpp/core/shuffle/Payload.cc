@@ -35,8 +35,7 @@ static const Payload::Type kUncompressedType = Payload::Type::kUncompressed;
 
 template <typename T>
 void write(uint8_t** dst, T data) {
-  auto ptr = reinterpret_cast<T*>(*dst);
-  *ptr = data;
+  memcpy(*dst, &data, sizeof(T));
   *dst += sizeof(T);
 }
 
@@ -49,29 +48,29 @@ T* advance(uint8_t** dst) {
 
 arrow::Result<int64_t> compressBuffer(
     const std::shared_ptr<arrow::Buffer>& buffer,
-    uint8_t*& output,
+    uint8_t** output,
     int64_t outputLength,
     arrow::util::Codec* codec) {
   if (!buffer) {
-    write<int64_t>(&output, kNullBuffer);
+    write<int64_t>(output, kNullBuffer);
     return sizeof(int64_t);
   }
   if (buffer->size() == 0) {
-    write<int64_t>(&output, kZeroLengthBuffer);
+    write<int64_t>(output, kZeroLengthBuffer);
     return sizeof(int64_t);
   }
   static const int64_t kCompressedBufferHeaderLength = 2 * sizeof(int64_t);
-  auto* compressedLengthPtr = advance<int64_t>(&output);
-  write(&output, static_cast<int64_t>(buffer->size()));
-  ARROW_ASSIGN_OR_RAISE(auto compressedLength, codec->Compress(buffer->size(), buffer->data(), outputLength, output));
+  auto* compressedLengthPtr = advance<int64_t>(output);
+  write(output, static_cast<int64_t>(buffer->size()));
+  ARROW_ASSIGN_OR_RAISE(auto compressedLength, codec->Compress(buffer->size(), buffer->data(), outputLength, *output));
   if (compressedLength > buffer->size()) {
     // Write uncompressed buffer.
-    memcpy(output, buffer->data(), buffer->size());
-    output += buffer->size();
+    memcpy(*output, buffer->data(), buffer->size());
+    *output += buffer->size();
     *compressedLengthPtr = kUncompressedBuffer;
     return kCompressedBufferHeaderLength + buffer->size();
   }
-  output += compressedLength;
+  *output += compressedLength;
   *compressedLengthPtr = static_cast<int64_t>(compressedLength);
   return kCompressedBufferHeaderLength + compressedLength;
 }
@@ -94,7 +93,7 @@ arrow::Status compressAndFlush(
       std::shared_ptr<arrow::ResizableBuffer> compressed,
       arrow::AllocateResizableBuffer(sizeof(int64_t) * 2 + maxCompressedLength, pool));
   auto output = compressed->mutable_data();
-  ARROW_ASSIGN_OR_RAISE(auto compressedSize, compressBuffer(buffer, output, maxCompressedLength, codec));
+  ARROW_ASSIGN_OR_RAISE(auto compressedSize, compressBuffer(buffer, &output, maxCompressedLength, codec));
   RETURN_NOT_OK(outputStream->Write(compressed->data(), compressedSize));
   return arrow::Status::OK();
 }
@@ -185,7 +184,7 @@ arrow::Result<std::unique_ptr<BlockPayload>> BlockPayload::fromBuffers(
   if (type == Payload::Type::kCompressed) {
     // Compress.
     // Compressed buffer layout: | buffer1 compressedLength | buffer1 uncompressedLength | buffer1 | ...
-    auto metadataLength = sizeof(int64_t) * 2 * buffers.size();
+    const auto metadataLength = sizeof(int64_t) * 2 * buffers.size();
     int64_t totalCompressedLength =
         std::accumulate(buffers.begin(), buffers.end(), 0LL, [&](auto sum, const auto& buffer) {
           if (!buffer) {
@@ -193,17 +192,17 @@ arrow::Result<std::unique_ptr<BlockPayload>> BlockPayload::fromBuffers(
           }
           return sum + codec->MaxCompressedLen(buffer->size(), buffer->data());
         });
+    const auto maxCompressedLength = metadataLength + totalCompressedLength;
     ARROW_ASSIGN_OR_RAISE(
-        std::shared_ptr<arrow::ResizableBuffer> compressed,
-        arrow::AllocateResizableBuffer(metadataLength + totalCompressedLength, pool));
+        std::shared_ptr<arrow::ResizableBuffer> compressed, arrow::AllocateResizableBuffer(maxCompressedLength, pool));
     auto output = compressed->mutable_data();
     int64_t actualLength = 0;
 
     // Compress buffers one by one.
     for (auto& buffer : buffers) {
-      auto availableLength = compressed->size() - actualLength;
+      auto availableLength = maxCompressedLength - actualLength;
       // Release buffer after compression.
-      ARROW_ASSIGN_OR_RAISE(auto compressedSize, compressBuffer(std::move(buffer), output, availableLength, codec));
+      ARROW_ASSIGN_OR_RAISE(auto compressedSize, compressBuffer(std::move(buffer), &output, availableLength, codec));
       actualLength += compressedSize;
     }
 
@@ -532,10 +531,7 @@ UncompressedDiskBlockPayload::UncompressedDiskBlockPayload(
     arrow::io::InputStream*& inputStream,
     uint64_t rawSize,
     arrow::util::Codec* codec)
-    : Payload(type, numRows, isValidityBuffer, pool),
-      inputStream_(inputStream),
-      rawSize_(rawSize),
-      codec_(codec) {}
+    : Payload(type, numRows, isValidityBuffer, pool), inputStream_(inputStream), rawSize_(rawSize), codec_(codec) {}
 
 arrow::Result<std::shared_ptr<arrow::Buffer>> UncompressedDiskBlockPayload::readBufferAt(uint32_t index) {
   return arrow::Status::Invalid("Cannot read buffer from UncompressedDiskBlockPayload.");
@@ -584,9 +580,7 @@ CompressedDiskBlockPayload::CompressedDiskBlockPayload(
     arrow::MemoryPool* pool,
     arrow::io::InputStream*& inputStream,
     uint64_t rawSize)
-    : Payload(Type::kCompressed, numRows, isValidityBuffer, pool),
-      inputStream_(inputStream),
-      rawSize_(rawSize) {}
+    : Payload(Type::kCompressed, numRows, isValidityBuffer, pool), inputStream_(inputStream), rawSize_(rawSize) {}
 
 arrow::Status CompressedDiskBlockPayload::serialize(arrow::io::OutputStream* outputStream) {
   ARROW_ASSIGN_OR_RAISE(auto block, inputStream_->Read(rawSize_));
