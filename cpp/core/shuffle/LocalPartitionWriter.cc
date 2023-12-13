@@ -90,13 +90,7 @@ class CacheEvictor final : public LocalPartitionWriter::LocalEvictor {
           diskSpill_ = std::make_unique<DiskSpill>(numPartitions_, DiskSpill::SpillType::kBatchedSpill, spillFile_);
         }
         diskSpill_->insertPayload(
-            pid,
-            payload->type(),
-            payload->numRows(),
-            payload->isValidityBuffer(),
-            end - start,
-            pool_,
-            codec_);
+            pid, payload->type(), payload->numRows(), payload->isValidityBuffer(), end - start, pool_, codec_);
         start = end;
       }
     }
@@ -175,13 +169,7 @@ class SpillEvictor final : public LocalPartitionWriter::LocalEvictor {
     DEBUG_OUT << "Spilled partition " << partitionId << " file start: " << start << ", file end: " << end
               << ", file: " << spillFile_ << std::endl;
     spill_->insertPayload(
-        partitionId,
-        payload->type(),
-        payload->numRows(),
-        payload->isValidityBuffer(),
-        end - start,
-        pool_,
-        codec_);
+        partitionId, payload->type(), payload->numRows(), payload->isValidityBuffer(), end - start, pool_, codec_);
     return arrow::Status::OK();
   }
 
@@ -279,11 +267,16 @@ void LocalPartitionWriter::init() {
 }
 
 arrow::Status LocalPartitionWriter::mergeSpills(uint32_t partitionId) {
+  auto spillId = 0;
   for (const auto& spill : spillResults_) {
+    ARROW_ASSIGN_OR_RAISE(auto st, dataFileOs_->Tell());
     // Read if partition exists in the spilled file and write to the final file.
     while (auto payload = spill->nextPayload(partitionId)) {
       RETURN_NOT_OK(payload->serialize(dataFileOs_.get()));
     }
+    ARROW_ASSIGN_OR_RAISE(auto ed, dataFileOs_->Tell());
+    std::cout << "Partition " << partitionId << " spilled from spillResult " << spillId++ << " of bytes " << ed - st
+              << std::endl;
   }
   return arrow::Status::OK();
 }
@@ -302,7 +295,7 @@ arrow::Status LocalPartitionWriter::stop(ShuffleWriterMetrics* metrics) {
   writeTimer.start();
 
   int64_t endInFinalFile = 0;
-  // Write cached batches.
+  // Group cached batches.
   if (evictor_) {
     ARROW_RETURN_IF(evictor_->evictType() != LocalEvictor::Type::kCache, arrow::Status::Invalid("Unclosed evictor."));
     ARROW_ASSIGN_OR_RAISE(auto groupingSpill, evictor_->finish());

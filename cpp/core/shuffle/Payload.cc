@@ -63,7 +63,7 @@ arrow::Result<int64_t> compressBuffer(
   auto* compressedLengthPtr = advance<int64_t>(output);
   write(output, static_cast<int64_t>(buffer->size()));
   ARROW_ASSIGN_OR_RAISE(auto compressedLength, codec->Compress(buffer->size(), buffer->data(), outputLength, *output));
-  if (compressedLength > buffer->size()) {
+  if (compressedLength >= buffer->size()) {
     // Write uncompressed buffer.
     memcpy(*output, buffer->data(), buffer->size());
     *output += buffer->size();
@@ -207,7 +207,7 @@ arrow::Result<std::unique_ptr<BlockPayload>> BlockPayload::fromBuffers(
     }
 
     ARROW_RETURN_IF(
-        compressed->size() < actualLength, arrow::Status::Invalid("Writing compressed buffer out of bound."));
+        maxCompressedLength < actualLength, arrow::Status::Invalid("Writing compressed buffer out of bound."));
     RETURN_NOT_OK(compressed->Resize(actualLength));
     return std::make_unique<BlockPayload>(
         Type::kCompressed,
@@ -215,7 +215,7 @@ arrow::Result<std::unique_ptr<BlockPayload>> BlockPayload::fromBuffers(
         isValidityBuffer,
         pool,
         codec,
-        std::vector<std::shared_ptr<arrow::Buffer>>{compressed});
+        std::vector<std::shared_ptr<arrow::Buffer>>{std::move(compressed)});
   }
   if (reuseBuffers) {
     // Copy source buffers.
@@ -276,9 +276,8 @@ arrow::Result<std::vector<std::shared_ptr<arrow::Buffer>>> BlockPayload::deseria
   numRows = typeAndRows.second;
   auto fields = schema->fields();
 
-  auto isCompressionEnabled = typeAndRows.first == Type::kUncompressed || codec == nullptr;
   auto readBuffer = [&]() {
-    if (isCompressionEnabled) {
+    if (typeAndRows.first == Type::kUncompressed) {
       return readUncompressedBuffer(inputStream);
     } else {
       return readCompressedBuffer(inputStream, codec, pool);
