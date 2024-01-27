@@ -18,6 +18,7 @@
 #pragma once
 
 #include <chrono>
+#include <iostream>
 
 using TimePoint = std::chrono::time_point<std::chrono::steady_clock, std::chrono::nanoseconds>;
 
@@ -91,5 +92,33 @@ class ScopedTimer {
     timer_.reset();
     timer_.start();
   }
+};
+
+class LogTimer {
+ public:
+  explicit LogTimer(int64_t threadId, int64_t microOffset) : threadId_(threadId), microOffset_(microOffset) {
+    startTime_ = std::chrono::system_clock::now();
+  }
+
+  void abandon() {
+    abandoned_ = true;
+  }
+
+  ~LogTimer() {
+    if (!abandoned_) {
+      auto startTime = std::chrono::duration_cast<std::chrono::microseconds>(startTime_.time_since_epoch());
+      auto end = std::chrono::system_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - startTime_).count();
+      std::cout << "SHUFFLE_READER_BREAKDOWN: [deserialize]" << threadId_ << " " << startTime.count() - microOffset_
+                << " " << duration << std::endl;
+    }
+  }
+
+ private:
+  int64_t threadId_;
+  int64_t microOffset_;
+  std::chrono::system_clock::time_point startTime_{}; // If running_
+
+  bool abandoned_{false};
 };
 } // namespace gluten

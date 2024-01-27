@@ -37,7 +37,9 @@ class VeloxColumnarBatchDeserializer final : public ColumnarBatchIterator {
       std::vector<bool>* isValidityBuffer,
       bool hasComplexType,
       int64_t& deserializeTime,
-      int64_t& decompressTime);
+      int64_t& decompressTime,
+      int64_t threadId,
+      int64_t microOffset);
 
   std::shared_ptr<ColumnarBatch> next();
 
@@ -54,6 +56,8 @@ class VeloxColumnarBatchDeserializer final : public ColumnarBatchIterator {
 
   int64_t& deserializeTime_;
   int64_t& decompressTime_;
+  int64_t threadId_;
+  int64_t microOffset_;
 
   std::unique_ptr<InMemoryPayload> merged_{nullptr};
   bool reachEos_{false};
@@ -67,7 +71,9 @@ class VeloxColumnarBatchDeserializerFactory : public DeserializerFactory {
       const facebook::velox::RowTypePtr& rowType,
       int32_t batchSize,
       arrow::MemoryPool* memoryPool,
-      std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool);
+      std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool,
+      int64_t threadId,
+      int64_t microOffset);
 
   std::unique_ptr<ColumnarBatchIterator> createDeserializer(std::shared_ptr<arrow::io::InputStream> in) override;
 
@@ -84,6 +90,8 @@ class VeloxColumnarBatchDeserializerFactory : public DeserializerFactory {
   int32_t batchSize_;
   arrow::MemoryPool* memoryPool_;
   std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool_;
+  int64_t threadId_;
+  int64_t microOffset_;
 
   std::vector<bool> isValidityBuffer_;
   bool hasComplexType_{false};

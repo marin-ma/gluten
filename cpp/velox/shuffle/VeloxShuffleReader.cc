@@ -440,7 +440,9 @@ VeloxColumnarBatchDeserializer::VeloxColumnarBatchDeserializer(
     std::vector<bool>* isValidityBuffer,
     bool hasComplexType,
     int64_t& deserializeTime,
-    int64_t& decompressTime)
+    int64_t& decompressTime,
+    int64_t threadId,
+    int64_t microOffset)
     : in_(std::move(in)),
       schema_(schema),
       codec_(codec),
@@ -451,9 +453,12 @@ VeloxColumnarBatchDeserializer::VeloxColumnarBatchDeserializer(
       isValidityBuffer_(isValidityBuffer),
       hasComplexType_(hasComplexType),
       deserializeTime_(deserializeTime),
-      decompressTime_(decompressTime) {}
+      decompressTime_(decompressTime),
+      threadId_(threadId),
+      microOffset_(microOffset) {}
 
 std::shared_ptr<ColumnarBatch> VeloxColumnarBatchDeserializer::next() {
+  LogTimer timer(threadId_, microOffset_);
   if (hasComplexType_) {
     uint32_t numRows;
     GLUTEN_ASSIGN_OR_THROW(
@@ -461,6 +466,7 @@ std::shared_ptr<ColumnarBatch> VeloxColumnarBatchDeserializer::next() {
         BlockPayload::deserialize(in_.get(), schema_, codec_, memoryPool_, numRows, decompressTime_));
     if (numRows == 0) {
       // Reach EOS.
+      timer.abandon();
       return nullptr;
     }
     return makeColumnarBatch(rowType_, numRows, std::move(arrowBuffers), veloxPool_, deserializeTime_);
@@ -470,6 +476,7 @@ std::shared_ptr<ColumnarBatch> VeloxColumnarBatchDeserializer::next() {
     if (merged_) {
       return makeColumnarBatch(rowType_, std::move(merged_), veloxPool_, deserializeTime_);
     }
+    timer.abandon();
     return nullptr;
   }
 
@@ -499,6 +506,7 @@ std::shared_ptr<ColumnarBatch> VeloxColumnarBatchDeserializer::next() {
 
   // Reach EOS.
   if (reachEos_ && !merged_) {
+    timer.abandon();
     return nullptr;
   }
 
@@ -517,13 +525,17 @@ VeloxColumnarBatchDeserializerFactory::VeloxColumnarBatchDeserializerFactory(
     const RowTypePtr& rowType,
     int32_t batchSize,
     arrow::MemoryPool* memoryPool,
-    std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool)
+    std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool,
+    int64_t threadId,
+    int64_t microOffset)
     : schema_(schema),
       codec_(codec),
       rowType_(rowType),
       batchSize_(batchSize),
       memoryPool_(memoryPool),
-      veloxPool_(veloxPool) {
+      veloxPool_(veloxPool),
+      threadId_(threadId),
+      microOffset_(microOffset) {
   initFromSchema();
 }
 
@@ -540,7 +552,9 @@ std::unique_ptr<ColumnarBatchIterator> VeloxColumnarBatchDeserializerFactory::cr
       &isValidityBuffer_,
       hasComplexType_,
       deserializeTime_,
-      decompressTime_);
+      decompressTime_,
+      threadId_,
+      microOffset_);
 }
 
 arrow::MemoryPool* VeloxColumnarBatchDeserializerFactory::getPool() {

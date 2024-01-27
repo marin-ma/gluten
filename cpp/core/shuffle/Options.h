@@ -38,6 +38,9 @@ struct ShuffleReaderOptions {
   arrow::Compression::type compressionType = arrow::Compression::type::LZ4_FRAME;
   CodecBackend codecBackend = CodecBackend::NONE;
   int32_t batchSize = kDefaultBatchSize;
+
+  int64_t threadId = -1;
+  int64_t microOffset = -1;
 };
 
 struct ShuffleWriterOptions {

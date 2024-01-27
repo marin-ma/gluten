@@ -1039,6 +1039,11 @@ JNIEXPORT jlong JNICALL Java_io_glutenproject_vectorized_ShuffleReaderJniWrapper
   std::shared_ptr<arrow::Schema> schema =
       gluten::arrowGetOrThrow(arrow::ImportSchema(reinterpret_cast<struct ArrowSchema*>(cSchema)));
 
+  options.threadId = getThreadId(env);
+  auto startTimeMicros = startNanos(env) / 1000;
+  auto startTime =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  options.microOffset = startTime - startTimeMicros;
   return ctx->objectStore()->save(ctx->createShuffleReader(schema, options, pool, memoryManager));
   JNI_METHOD_END(kInvalidResourceHandle)
 }

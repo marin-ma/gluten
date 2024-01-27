@@ -206,6 +206,29 @@ static inline gluten::CompressionMode getCompressionMode(JNIEnv* env, jstring co
   }
 }
 
+static int64_t getThreadId(JNIEnv* env) {
+  jclass cls = env->FindClass("java/lang/Thread");
+  jmethodID mid = env->GetStaticMethodID(cls, "currentThread", "()Ljava/lang/Thread;");
+  jobject thread = env->CallStaticObjectMethod(cls, mid);
+  checkException(env);
+  if (thread == NULL) {
+    throw gluten::GlutenException("Thread.currentThread() return NULL");
+  } else {
+    jmethodID midGetid = getMethodIdOrError(env, cls, "getId", "()J");
+    jlong sid = env->CallLongMethod(thread, midGetid);
+    checkException(env);
+    return (int64_t)sid;
+  }
+}
+
+static int64_t startNanos(JNIEnv* env) {
+  jclass cls = env->FindClass("java/lang/System");
+  jmethodID mid = env->GetStaticMethodID(cls, "nanoTime", "()J");
+  jlong nanoTime = env->CallStaticLongMethod(cls, mid);
+  checkException(env);
+  return (int64_t)nanoTime;
+}
+
 class SparkAllocationListener final : public gluten::AllocationListener {
  public:
   SparkAllocationListener(
