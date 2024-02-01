@@ -90,7 +90,9 @@ class BlockPayload : public Payload {
       const std::shared_ptr<arrow::util::Codec>& codec,
       arrow::MemoryPool* pool,
       uint32_t& numRows,
-      int64_t& decompressTime);
+      int64_t& decompressTime,
+      int64_t threadId,
+      int64_t microOffset);
 
   arrow::Status serialize(arrow::io::OutputStream* outputStream) override;
 

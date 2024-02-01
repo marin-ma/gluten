@@ -120,7 +120,9 @@ arrow::Status compressAndFlush(
   return arrow::Status::OK();
 }
 
-arrow::Result<std::shared_ptr<arrow::Buffer>> readUncompressedBuffer(arrow::io::InputStream* inputStream) {
+arrow::Result<std::shared_ptr<arrow::Buffer>>
+readUncompressedBuffer(arrow::io::InputStream* inputStream, int64_t threadId, int64_t microOffset) {
+  LogTimer timer(threadId, microOffset, logger::kReadStreamTime);
   int64_t bufferLength;
   RETURN_NOT_OK(inputStream->Read(sizeof(int64_t), &bufferLength));
   if (bufferLength == kNullBuffer) {
@@ -134,7 +136,10 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> readCompressedBuffer(
     arrow::io::InputStream* inputStream,
     const std::shared_ptr<arrow::util::Codec>& codec,
     arrow::MemoryPool* pool,
-    int64_t& decompressTime) {
+    int64_t& decompressTime,
+    int64_t threadId,
+    int64_t microOffset) {
+  auto readStreamTimer = std::make_unique<LogTimer>(threadId, microOffset, logger::kReadStreamTime);
   int64_t compressedLength;
   RETURN_NOT_OK(inputStream->Read(sizeof(int64_t), &compressedLength));
   if (compressedLength == kNullBuffer) {
@@ -153,6 +158,8 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> readCompressedBuffer(
   }
   ARROW_ASSIGN_OR_RAISE(auto compressed, arrow::AllocateBuffer(compressedLength, pool));
   RETURN_NOT_OK(inputStream->Read(compressedLength, const_cast<uint8_t*>(compressed->data())));
+
+  readStreamTimer.reset(new LogTimer(threadId, microOffset, logger::kDecompressTime));
 
   ScopedTimer timer(&decompressTime);
   ARROW_ASSIGN_OR_RAISE(auto output, arrow::AllocateResizableBuffer(uncompressedLength, pool));
@@ -284,7 +291,9 @@ arrow::Result<std::vector<std::shared_ptr<arrow::Buffer>>> BlockPayload::deseria
     const std::shared_ptr<arrow::util::Codec>& codec,
     arrow::MemoryPool* pool,
     uint32_t& numRows,
-    int64_t& decompressTime) {
+    int64_t& decompressTime,
+    int64_t threadId,
+    int64_t microOffset) {
   static const std::vector<std::shared_ptr<arrow::Buffer>> kEmptyBuffers{};
   ARROW_ASSIGN_OR_RAISE(auto typeAndRows, readTypeAndRows(inputStream));
   if (typeAndRows.first == 0) {
@@ -297,9 +306,9 @@ arrow::Result<std::vector<std::shared_ptr<arrow::Buffer>>> BlockPayload::deseria
   auto isCompressionEnabled = typeAndRows.first == Type::kCompressed;
   auto readBuffer = [&]() {
     if (isCompressionEnabled) {
-      return readCompressedBuffer(inputStream, codec, pool, decompressTime);
+      return readCompressedBuffer(inputStream, codec, pool, decompressTime, threadId, microOffset);
     } else {
-      return readUncompressedBuffer(inputStream);
+      return readUncompressedBuffer(inputStream, threadId, microOffset);
     }
   };
 

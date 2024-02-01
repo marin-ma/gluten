@@ -94,9 +94,17 @@ class ScopedTimer {
   }
 };
 
+namespace logger {
+static const std::string kDecompressTime = "decompress";
+static const std::string kReadStreamTime = "read stream";
+static const std::string kMerge = "merge";
+static const std::string kArrowToVelox = "arrow to velox";
+} // namespace logger
+
 class LogTimer {
  public:
-  explicit LogTimer(int64_t threadId, int64_t microOffset) : threadId_(threadId), microOffset_(microOffset) {
+  explicit LogTimer(int64_t threadId, int64_t microOffset, const std::string& name)
+      : threadId_(threadId), microOffset_(microOffset), name_(name) {
     startTime_ = std::chrono::system_clock::now();
   }
 
@@ -109,7 +117,7 @@ class LogTimer {
       auto startTime = std::chrono::duration_cast<std::chrono::microseconds>(startTime_.time_since_epoch());
       auto end = std::chrono::system_clock::now();
       auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - startTime_).count();
-      std::cout << "SHUFFLE_READER_BREAKDOWN: [deserialize]" << threadId_ << " " << startTime.count() - microOffset_
+      std::cout << "SHUFFLE_READER_BREAKDOWN: [" << name_ << "]" << threadId_ << " " << startTime.count() - microOffset_
                 << " " << duration << std::endl;
     }
   }
@@ -117,6 +125,7 @@ class LogTimer {
  private:
   int64_t threadId_;
   int64_t microOffset_;
+  const std::string& name_;
   std::chrono::system_clock::time_point startTime_{}; // If running_
 
   bool abandoned_{false};

@@ -458,25 +458,25 @@ VeloxColumnarBatchDeserializer::VeloxColumnarBatchDeserializer(
       microOffset_(microOffset) {}
 
 std::shared_ptr<ColumnarBatch> VeloxColumnarBatchDeserializer::next() {
-  LogTimer timer(threadId_, microOffset_);
   if (hasComplexType_) {
     uint32_t numRows;
     GLUTEN_ASSIGN_OR_THROW(
         auto arrowBuffers,
-        BlockPayload::deserialize(in_.get(), schema_, codec_, memoryPool_, numRows, decompressTime_));
+        BlockPayload::deserialize(
+            in_.get(), schema_, codec_, memoryPool_, numRows, decompressTime_, threadId_, microOffset_));
     if (numRows == 0) {
       // Reach EOS.
-      timer.abandon();
       return nullptr;
     }
+    LogTimer logger(threadId_, microOffset_, logger::kArrowToVelox);
     return makeColumnarBatch(rowType_, numRows, std::move(arrowBuffers), veloxPool_, deserializeTime_);
   }
 
   if (reachEos_) {
     if (merged_) {
+      LogTimer logger(threadId_, microOffset_, logger::kArrowToVelox);
       return makeColumnarBatch(rowType_, std::move(merged_), veloxPool_, deserializeTime_);
     }
-    timer.abandon();
     return nullptr;
   }
 
@@ -484,7 +484,9 @@ std::shared_ptr<ColumnarBatch> VeloxColumnarBatchDeserializer::next() {
   uint32_t numRows = 0;
   while (!merged_ || merged_->numRows() < batchSize_) {
     GLUTEN_ASSIGN_OR_THROW(
-        arrowBuffers, BlockPayload::deserialize(in_.get(), schema_, codec_, memoryPool_, numRows, decompressTime_));
+        arrowBuffers,
+        BlockPayload::deserialize(
+            in_.get(), schema_, codec_, memoryPool_, numRows, decompressTime_, threadId_, microOffset_));
     if (numRows == 0) {
       reachEos_ = true;
       break;
@@ -500,23 +502,25 @@ std::shared_ptr<ColumnarBatch> VeloxColumnarBatchDeserializer::next() {
     }
 
     auto append = std::make_unique<InMemoryPayload>(numRows, isValidityBuffer_, std::move(arrowBuffers));
+
+    LogTimer logTimer(threadId_, microOffset_, logger::kMerge);
     GLUTEN_ASSIGN_OR_THROW(merged_, InMemoryPayload::merge(std::move(merged_), std::move(append), memoryPool_));
     arrowBuffers.clear();
   }
 
   // Reach EOS.
   if (reachEos_ && !merged_) {
-    timer.abandon();
     return nullptr;
   }
 
-  auto columnarBatch = makeColumnarBatch(rowType_, std::move(merged_), veloxPool_, deserializeTime_);
-
+  auto merged = std::move(merged_);
   // Save remaining rows.
   if (!arrowBuffers.empty()) {
     merged_ = std::make_unique<InMemoryPayload>(numRows, isValidityBuffer_, std::move(arrowBuffers));
   }
-  return columnarBatch;
+
+  LogTimer logger(threadId_, microOffset_, logger::kArrowToVelox);
+  return makeColumnarBatch(rowType_, std::move(merged), veloxPool_, deserializeTime_);
 }
 
 VeloxColumnarBatchDeserializerFactory::VeloxColumnarBatchDeserializerFactory(
