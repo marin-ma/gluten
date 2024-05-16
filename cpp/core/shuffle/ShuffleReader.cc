@@ -16,6 +16,9 @@
  */
 
 #include "ShuffleReader.h"
+
+#include <jni/JniCommon.h>
+
 #include "arrow/ipc/reader.h"
 #include "arrow/record_batch.h"
 #include "utils/macros.h"
@@ -46,6 +49,10 @@ int64_t ShuffleReader::getDecompressTime() const {
 
 int64_t ShuffleReader::getIpcTime() const {
   return ipcTime_;
+}
+
+ShuffleWriterType ShuffleReader::getShuffleWriterType() const {
+  return factory_->getShuffleWriterType();
 }
 
 int64_t ShuffleReader::getDeserializeTime() const {
