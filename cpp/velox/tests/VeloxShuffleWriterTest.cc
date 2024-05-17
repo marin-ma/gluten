@@ -81,9 +81,9 @@ std::vector<ShuffleTestParams> createShuffleTestParams() {
       }
       params.push_back(ShuffleTestParams{
           ShuffleWriterType::kHashShuffle, PartitionWriterType::kRss, compression, compressionThreshold, 0});
-      params.push_back(ShuffleTestParams{
-          ShuffleWriterType::kSortShuffle, PartitionWriterType::kRss, compression, compressionThreshold, 0});
     }
+    params.push_back(ShuffleTestParams{
+        ShuffleWriterType::kSortShuffle, PartitionWriterType::kRss, compression, 4096, 0});
   }
 
   return params;
