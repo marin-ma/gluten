@@ -129,8 +129,6 @@ class VeloxShuffleWriter : public ShuffleWriter {
 
   std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool_;
 
-  bool supportAvx512_ = false;
-
   int32_t maxBatchSize_{0};
 
   enum EvictState { kEvictable, kUnevictable };

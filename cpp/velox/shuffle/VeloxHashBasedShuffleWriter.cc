@@ -168,12 +168,6 @@ arrow::Result<std::shared_ptr<VeloxShuffleWriter>> VeloxHashBasedShuffleWriter::
 } // namespace gluten
 
 arrow::Status VeloxHashBasedShuffleWriter::init() {
-#if defined(__x86_64__)
-  supportAvx512_ = __builtin_cpu_supports("avx512bw");
-#else
-  supportAvx512_ = false;
-#endif
-
   ARROW_ASSIGN_OR_RAISE(
       partitioner_, Partitioner::make(options_.partitioning, numPartitions_, options_.startPartitionId));
   DLOG(INFO) << "Create partitioning type: " << std::to_string(options_.partitioning);
@@ -249,27 +243,7 @@ arrow::Status VeloxHashBasedShuffleWriter::write(std::shared_ptr<ColumnarBatch> 
     VELOX_CHECK_NOT_NULL(veloxColumnBatch);
     auto& rv = *veloxColumnBatch->getFlattenedRowVector();
     RETURN_NOT_OK(initFromRowVector(rv));
-    std::vector<std::shared_ptr<arrow::Buffer>> buffers;
-    std::vector<facebook::velox::VectorPtr> complexChildren;
-    for (auto& child : rv.children()) {
-      if (child->encoding() == facebook::velox::VectorEncoding::Simple::FLAT) {
-        auto status = VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH_ALL(
-            collectFlatVectorBuffer, child->typeKind(), child.get(), buffers, partitionBufferPool_.get());
-        RETURN_NOT_OK(status);
-      } else {
-        complexChildren.emplace_back(child);
-      }
-    }
-    if (complexChildren.size() > 0) {
-      auto rowVector = std::make_shared<facebook::velox::RowVector>(
-          veloxPool_.get(),
-          complexWriteType_,
-          facebook::velox::BufferPtr(nullptr),
-          rv.size(),
-          std::move(complexChildren));
-      buffers.emplace_back();
-      ARROW_ASSIGN_OR_RAISE(buffers.back(), generateComplexTypeBuffers(rowVector));
-    }
+    ARROW_ASSIGN_OR_RAISE(auto buffers, collectBuffersFromRowVector(rv));
     RETURN_NOT_OK(evictBuffers(0, rv.size(), std::move(buffers), false));
   } else if (options_.partitioning == Partitioning::kRange) {
     auto compositeBatch = std::dynamic_pointer_cast<CompositeColumnarBatch>(cb);
@@ -324,6 +298,20 @@ arrow::Status VeloxHashBasedShuffleWriter::partitioningAndDoSplit(facebook::velo
     RETURN_NOT_OK(partitioner_->compute(nullptr, rv->size(), row2Partition_, partition2RowCount_));
     END_TIMING();
     RETURN_NOT_OK(doSplit(*rv, memLimit));
+  }
+  return arrow::Status::OK();
+}
+
+arrow::Status VeloxHashBasedShuffleWriter::partitioningAndEvict(facebook::velox::RowVectorPtr rv, int64_t memLimit) {
+  if (partitioner_->hasPid()) {
+    auto pidArr = getFirstColumn(*rv);
+    RETURN_NOT_OK(partitioner_->compute(pidArr, rv->size(), row2Partition_, partition2RowCount_));
+    auto strippedRv = getStrippedRowVector(*rv);
+    RETURN_NOT_OK(initFromRowVector(*strippedRv));
+    localSort(strippedRv, row2Partition_, veloxPool_.get());
+  } else {
+    RETURN_NOT_OK(initFromRowVector(*rv));
+    RETURN_NOT_OK(partitioner_->compute(nullptr, rv->size(), row2Partition_, partition2RowCount_));
   }
   return arrow::Status::OK();
 }
@@ -1453,6 +1441,32 @@ arrow::Status VeloxHashBasedShuffleWriter::preAllocPartitionBuffers(uint32_t pre
 
 bool VeloxHashBasedShuffleWriter::isExtremelyLargeBatch(facebook::velox::RowVectorPtr& rv) const {
   return (rv->size() > maxBatchSize_ && maxBatchSize_ > 0);
+}
+
+arrow::Result<std::vector<std::shared_ptr<arrow::Buffer>>> VeloxHashBasedShuffleWriter::collectBuffersFromRowVector(
+    const facebook::velox::RowVector& rv) {
+  std::vector<std::shared_ptr<arrow::Buffer>> buffers;
+  std::vector<facebook::velox::VectorPtr> complexChildren;
+  for (auto& child : rv.children()) {
+    if (child->encoding() == facebook::velox::VectorEncoding::Simple::FLAT) {
+      auto status = VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH_ALL(
+          collectFlatVectorBuffer, child->typeKind(), child.get(), buffers, partitionBufferPool_.get());
+      RETURN_NOT_OK(status);
+    } else {
+      complexChildren.emplace_back(child);
+    }
+  }
+  if (complexChildren.size() > 0) {
+    auto rowVector = std::make_shared<facebook::velox::RowVector>(
+        veloxPool_.get(),
+        complexWriteType_,
+        facebook::velox::BufferPtr(nullptr),
+        rv.size(),
+        std::move(complexChildren));
+    buffers.emplace_back();
+    ARROW_ASSIGN_OR_RAISE(buffers.back(), generateComplexTypeBuffers(rowVector));
+  }
+  return buffers;
 }
 
 } // namespace gluten

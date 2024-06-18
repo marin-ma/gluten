@@ -42,12 +42,6 @@ arrow::Result<std::shared_ptr<VeloxShuffleWriter>> VeloxSortBasedShuffleWriter::
 } // namespace gluten
 
 arrow::Status VeloxSortBasedShuffleWriter::init() {
-#if defined(__x86_64__)
-  supportAvx512_ = __builtin_cpu_supports("avx512bw");
-#else
-  supportAvx512_ = false;
-#endif
-
   ARROW_ASSIGN_OR_RAISE(
       partitioner_, Partitioner::make(options_.partitioning, numPartitions_, options_.startPartitionId));
   DLOG(INFO) << "Create partitioning type: " << std::to_string(options_.partitioning);
