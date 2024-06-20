@@ -32,9 +32,13 @@ import org.apache.spark.sql.execution.window.WindowExec
 
 case class RewrittenNodeWall(originalChild: SparkPlan) extends LeafExecNode {
   override protected def doExecute(): RDD[InternalRow] = throw new UnsupportedOperationException()
+
   override def supportsColumnar: Boolean = originalChild.supportsColumnar
+
   override def output: Seq[Attribute] = originalChild.output
+
   override def outputOrdering: Seq[SortOrder] = originalChild.outputOrdering
+
   override def outputPartitioning: Partitioning = originalChild.outputPartitioning
 }
 
@@ -70,12 +74,24 @@ class RewriteSparkPlanRulesManager private (rewriteRules: Seq[RewriteSingleNode]
   private def getTransformHintBack(
       origin: SparkPlan,
       rewrittenPlan: SparkPlan): Option[TransformHint] = {
-    // The rewritten plan may contain more nodes than origin, here use the node name to get it back
-    val target = rewrittenPlan.collect {
-      case p if p.nodeName == origin.nodeName => p
+    origin match {
+      case _: GenerateExec =>
+        // GenerateExec should fall back for both self-fallback and pre-project fallback.
+        // Therefore, we should retrieve possible fallback hints from all nodes before
+        // RewrittenNodeWall.
+        rewrittenPlan.map(TransformHints.getHintOption).find(_.isDefined) match {
+          case Some(hint) => hint
+          case None => None
+        }
+      case _ =>
+        // The rewritten plan may contain more nodes than origin, here use the node name to
+        // get it back
+        val target = rewrittenPlan.collect {
+          case p if p.nodeName == origin.nodeName => p
+        }
+        assert(target.size == 1)
+        TransformHints.getHintOption(target.head)
     }
-    assert(target.size == 1)
-    TransformHints.getHintOption(target.head)
   }
 
   private def applyRewriteRules(origin: SparkPlan): (SparkPlan, Option[String]) = {

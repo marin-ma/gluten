@@ -491,6 +491,7 @@ class VeloxSparkPlanExecApi extends SparkPlanExecApi {
       projectList
     )
   }
+
   override def genCartesianProductExecTransformer(
       left: SparkPlan,
       right: SparkPlan,
