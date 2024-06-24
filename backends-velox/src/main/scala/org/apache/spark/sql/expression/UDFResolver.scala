@@ -21,13 +21,12 @@ import org.apache.gluten.exception.GlutenException
 import org.apache.gluten.expression.{ConverterUtils, ExpressionTransformer, ExpressionType, GenericExpressionTransformer, Transformable}
 import org.apache.gluten.udf.UdfJniWrapper
 import org.apache.gluten.vectorized.JniWorkspace
-
 import org.apache.spark.{SparkConf, SparkContext, SparkFiles}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry.FunctionBuilder
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, ExpressionInfo}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, ExpressionInfo, Unevaluable}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateFunction
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
@@ -37,8 +36,7 @@ import org.apache.spark.util.Utils
 
 import java.io.File
 import java.net.URI
-import java.nio.file.{Files, FileVisitOption, Paths}
-
+import java.nio.file.{FileVisitOption, Files, Paths}
 import scala.collection.JavaConverters.asScalaIteratorConverter
 import scala.collection.mutable
 
@@ -94,7 +92,7 @@ case class UDFExpression(
     dataType: DataType,
     nullable: Boolean,
     children: Seq[Expression])
-  extends Transformable {
+  extends Unevaluable with Transformable {
   override protected def withNewChildrenInternal(
       newChildren: IndexedSeq[Expression]): Expression = {
     this.copy(children = newChildren)
