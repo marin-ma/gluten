@@ -181,8 +181,6 @@ arrow::Status VeloxHashBasedShuffleWriter::init() {
   if (options_.partitioning != Partitioning::kSingle) {
     partitionTotalRows_.resize(numPartitions_, 0);
     partitionBufferSize_.resize(numPartitions_);
-    partition2RowOffsetBase_.resize(numPartitions_ + 1);
-    partition2RowOffsetBase_[0] = 0;
   }
 
   partitionBufferNumRows_.resize(numPartitions_, 0);
@@ -407,25 +405,31 @@ arrow::Status VeloxHashBasedShuffleWriter::stop(int64_t memLimit) {
 void VeloxHashBasedShuffleWriter::buildPartition2Row() {
   SCOPED_TIMER(cpuWallTimingList_[CpuWallTimingBuildPartition]);
 
-  currentPartitionInUse_.clear();
-  const auto& partitionNumRows = partitionNumRows_.front();
-  for (auto pid = 0; pid < numPartitions_; ++pid) {
-    partition2RowOffsetBase_[pid + 1] = partition2RowOffsetBase_[pid] + partitionNumRows[pid];
-    if (partitionNumRows[pid] > 0) {
-      currentPartitionInUse_.push_back(pid);
+  currentPartitionInUse_.resize(inputs_.size());
+  partition2RowOffsetBase_.resize(inputs_.size());
+  rowOffset2RowId_.resize(inputs_.size());
+
+  for (auto i = 0; i < inputs_.size(); ++i) {
+    const auto& partitionNumRows = partitionNumRows_[i];
+    partition2RowOffsetBase_[i].resize(numPartitions_ + 1);
+    partition2RowOffsetBase_[i][0] = 0;
+    for (auto pid = 0; pid < numPartitions_; ++pid) {
+      partition2RowOffsetBase_[i][pid + 1] = partition2RowOffsetBase_[i][pid] + partitionNumRows[pid];
+      if (partitionNumRows[pid] > 0) {
+        currentPartitionInUse_[i].push_back(pid);
+      }
     }
-  }
+    // Calculate rowOffset2RowId_.
+    auto rowNum = inputs_[i]->size();
+    rowOffset2RowId_[i].resize(rowNum);
+    for (auto row = 0; row < rowNum; ++row) {
+      auto pid = row2Partition_[i][row];
+      rowOffset2RowId_[i][partition2RowOffsetBase_[i][pid]++] = row;
+    }
 
-  // Calculate rowOffset2RowId_.
-  auto rowNum = inputs_.front()->size();
-  rowOffset2RowId_.resize(rowNum);
-  for (auto row = 0; row < rowNum; ++row) {
-    auto pid = row2Partition_.front()[row];
-    rowOffset2RowId_[partition2RowOffsetBase_[pid]++] = row;
-  }
-
-  for (auto pid : currentPartitionInUse_) {
-    partition2RowOffsetBase_[pid] -= partitionNumRows[pid];
+    for (auto pid : currentPartitionInUse_[i]) {
+      partition2RowOffsetBase_[i][pid] -= partitionNumRows[pid];
+    }
   }
 }
 
@@ -463,136 +467,145 @@ void VeloxHashBasedShuffleWriter::setSplitState(SplitState state) {
 }
 
 arrow::Status VeloxHashBasedShuffleWriter::doSplit(int64_t memLimit) {
-  DLOG(INFO) << "Splitting after caching " << inputs_.size() << " input(s), "
-             << " retained bytes: " << retainedSize_;
+  LOG(WARNING) << "Splitting after caching " << inputs_.size() << " input(s), "
+               << " retained bytes: " << retainedSize_ << ", retained rows: " << retainedRows_;
   if (veloxColumnTypes_.empty()) {
     RETURN_NOT_OK(initFromRowVector(inputs_.front()));
   }
-  updateInputHasNull();
-  updatePartitionInUse();
-  updatePartitionBufferNumRows();
 
   START_TIMING(cpuWallTimingList_[CpuWallTimingIteratePartitions]);
   setSplitState(SplitState::kPreAlloc);
+  updateInputHasNull();
+  updatePartitionInUse();
+  updatePartitionBufferNumRows();
   // Calculate buffer size based on available offheap memory, history average bytes per row and options_.bufferSize.
   auto preAllocBufferSize = calculatePartitionBufferSize(memLimit);
   RETURN_NOT_OK(preAllocPartitionBuffers(preAllocBufferSize));
   END_TIMING();
 
   setSplitState(SplitState::kSplit);
-  while (!inputs_.empty()) {
-    buildPartition2Row();
-    RETURN_NOT_OK(splitRowVector());
-    inputs_.pop_front();
-    partitionNumRows_.pop_front();
-    row2Partition_.pop_front();
-  }
-
+  buildSplitChunks();
+  buildPartition2Row();
+  buildPartitionBufferWritePos();
+  RETURN_NOT_OK(splitByColumn());
   finishSplit();
   setSplitState(SplitState::kInit);
   return arrow::Status::OK();
 }
 
-arrow::Status VeloxHashBasedShuffleWriter::splitRowVector() {
+arrow::Status VeloxHashBasedShuffleWriter::splitByColumn() {
   SCOPED_TIMER(cpuWallTimingList_[CpuWallTimingSplitRV]);
 
-  const auto& rv = *inputs_.front();
-  // now start to split the RowVector
-  RETURN_NOT_OK(splitFixedWidthValueBuffer(rv));
-  RETURN_NOT_OK(splitValidityBuffer(rv));
-  RETURN_NOT_OK(splitBinaryArray(rv));
-  RETURN_NOT_OK(splitComplexType(rv));
+  // First split null bitmaps.
+  RETURN_NOT_OK(splitValidityBuffer());
+  // Free inputs_ after splitting null bitmaps as the value buffers are being held by SplitChunks.
+  inputs_.clear();
+  // Split the value buffers of simple type columns.
+  RETURN_NOT_OK(splitFixedWidthValueBuffer());
+  RETURN_NOT_OK(splitBinaryArray());
+  // Split complex type using Velox PrestoSerializer.
+  RETURN_NOT_OK(splitComplexType());
 
-  // update partition buffer base after split
-  for (auto& pid : currentPartitionInUse_) {
-    partitionBufferWritePos_[pid] += partitionNumRows_.front()[pid];
+  // Update partition buffer write pos after split.
+  for (auto pid : partitionInUse_) {
+    partitionBufferWritePos_[pid] += partitionTotalRows_[pid];
   }
   return arrow::Status::OK();
 }
 
 void VeloxHashBasedShuffleWriter::finishSplit() {
-  VELOX_CHECK(inputs_.empty());
-  VELOX_CHECK(row2Partition_.empty());
-  VELOX_CHECK(partitionNumRows_.empty());
-
-  std::fill(std::begin(partitionTotalRows_), std::end(partitionTotalRows_), 0);
-
+  for (auto pid : partitionInUse_) {
+    partitionTotalRows_[pid] = 0;
+  }
+  currentPartitionBufferWritePos_.clear();
+  row2Partition_.clear();
+  partitionNumRows_.clear();
+  currentPartitionInUse_.clear();
   partitionInUse_.clear();
+  partition2RowOffsetBase_.clear();
+  rowOffset2RowId_.clear();
+
+  numInputs_ = 0;
   retainedSize_ = 0;
   retainedRows_ = 0;
 }
 
-arrow::Status VeloxHashBasedShuffleWriter::splitFixedWidthValueBuffer(const facebook::velox::RowVector& rv) {
+arrow::Status VeloxHashBasedShuffleWriter::splitFixedWidthValueBuffer() {
   for (auto col = 0; col < fixedWidthColumnCount_; ++col) {
     auto colIdx = simpleColumnIndices_[col];
-    auto& column = rv.childAt(colIdx);
-    const uint8_t* srcAddr = (const uint8_t*)column->valuesAsVoid();
+    auto& columns = splitChunks_.fixedWidthColumns[col];
     const auto& dstAddrs = partitionFixedWidthValueAddrs_[col];
-
-    switch (arrow::bit_width(arrowColumnTypes_[colIdx]->id())) {
-      case 0: // arrow::NullType::type_id:
-        // No value buffer created for NullType.
-        break;
-      case 1: // arrow::BooleanType::type_id:
-        RETURN_NOT_OK(splitBoolType(srcAddr, dstAddrs));
-        break;
-      case 8:
-        RETURN_NOT_OK(splitFixedType<uint8_t>(srcAddr, dstAddrs));
-        break;
-      case 16:
-        RETURN_NOT_OK(splitFixedType<uint16_t>(srcAddr, dstAddrs));
-        break;
-      case 32:
-        RETURN_NOT_OK(splitFixedType<uint32_t>(srcAddr, dstAddrs));
-        break;
-      case 64: {
-        if (column->type()->kind() == facebook::velox::TypeKind::TIMESTAMP) {
-          RETURN_NOT_OK(splitFixedType<facebook::velox::int128_t>(srcAddr, dstAddrs));
-        } else {
-          RETURN_NOT_OK(splitFixedType<uint64_t>(srcAddr, dstAddrs));
-        }
-      } break;
-      case 128: // arrow::Decimal128Type::type_id
-        // too bad gcc generates movdqa even we use __m128i_u data type.
-        // splitFixedType<__m128i_u>(srcAddr, dstAddrs);
-        {
-          if (column->type()->isShortDecimal()) {
-            RETURN_NOT_OK(splitFixedType<int64_t>(srcAddr, dstAddrs));
-          } else if (column->type()->isLongDecimal()) {
-            // assume batch size = 32k; reducer# = 4K; row/reducer = 8
-            RETURN_NOT_OK(splitFixedType<facebook::velox::int128_t>(srcAddr, dstAddrs));
+    for (auto i = 0; i < numInputs_; ++i) {
+      auto column = std::move(columns.front());
+      columns.pop_front();
+      const uint8_t* srcAddr = (const uint8_t*)column->valuesAsVoid();
+      switch (arrow::bit_width(arrowColumnTypes_[colIdx]->id())) {
+        case 0: // arrow::NullType::type_id:
+          // No value buffer created for NullType.
+          break;
+        case 1: // arrow::BooleanType::type_id:
+          RETURN_NOT_OK(splitBoolType(i, srcAddr, dstAddrs));
+          break;
+        case 8:
+          RETURN_NOT_OK(splitFixedType<uint8_t>(i, srcAddr, dstAddrs));
+          break;
+        case 16:
+          RETURN_NOT_OK(splitFixedType<uint16_t>(i, srcAddr, dstAddrs));
+          break;
+        case 32:
+          RETURN_NOT_OK(splitFixedType<uint32_t>(i, srcAddr, dstAddrs));
+          break;
+        case 64: {
+          if (column->type()->kind() == facebook::velox::TypeKind::TIMESTAMP) {
+            RETURN_NOT_OK(splitFixedType<facebook::velox::int128_t>(i, srcAddr, dstAddrs));
           } else {
-            return arrow::Status::Invalid(
-                "Column type " + schema_->field(colIdx)->type()->ToString() + " is not supported.");
+            RETURN_NOT_OK(splitFixedType<uint64_t>(i, srcAddr, dstAddrs));
           }
-        }
-        break;
-      default:
-        return arrow::Status::Invalid(
-            "Column type " + schema_->field(colIdx)->type()->ToString() + " is not fixed width");
+        } break;
+        case 128: // arrow::Decimal128Type::type_id
+          // too bad gcc generates movdqa even we use __m128i_u data type.
+          // splitFixedType<__m128i_u>(srcAddr, dstAddrs);
+          {
+            if (column->type()->isShortDecimal()) {
+              RETURN_NOT_OK(splitFixedType<int64_t>(i, srcAddr, dstAddrs));
+            } else if (column->type()->isLongDecimal()) {
+              // assume batch size = 32k; reducer# = 4K; row/reducer = 8
+              RETURN_NOT_OK(splitFixedType<facebook::velox::int128_t>(i, srcAddr, dstAddrs));
+            } else {
+              return arrow::Status::Invalid(
+                  "Column type " + schema_->field(colIdx)->type()->ToString() + " is not supported.");
+            }
+          }
+          break;
+        default:
+          return arrow::Status::Invalid(
+              "Column type " + schema_->field(colIdx)->type()->ToString() + " is not fixed width");
+      }
     }
   }
-
   return arrow::Status::OK();
 }
 
 arrow::Status VeloxHashBasedShuffleWriter::splitBoolType(
+    uint32_t index,
     const uint8_t* srcAddr,
     const std::vector<uint8_t*>& dstAddrs) {
   // assume batch size = 32k; reducer# = 4K; row/reducer = 8
-  for (auto& pid : currentPartitionInUse_) {
+  const auto& partition2RowOffsetBase = partition2RowOffsetBase_[index];
+  const auto& rowOffset2RowId = rowOffset2RowId_[index];
+  for (auto& pid : currentPartitionInUse_[index]) {
     // set the last byte
-    auto dstaddr = dstAddrs[pid];
-    if (dstaddr != nullptr) {
-      auto r = partition2RowOffsetBase_[pid]; /*8k*/
-      auto size = partition2RowOffsetBase_[pid + 1];
-      auto dstOffset = partitionBufferWritePos_[pid];
+    auto dstAddr = dstAddrs[pid];
+    if (dstAddr != nullptr) {
+      auto r = partition2RowOffsetBase[pid]; /*8k*/
+      auto size = partition2RowOffsetBase[pid + 1];
+      auto dstOffset = currentPartitionBufferWritePos_[index][pid];
       auto dstOffsetInByte = (8 - (dstOffset & 0x7)) & 0x7;
       auto dstIdxByte = dstOffsetInByte;
-      auto dst = dstaddr[dstOffset >> 3];
+      auto dst = dstAddr[dstOffset >> 3];
 
       for (; r < size && dstIdxByte > 0; r++, dstIdxByte--) {
-        auto srcOffset = rowOffset2RowId_[r]; /*16k*/
+        auto srcOffset = rowOffset2RowId[r]; /*16k*/
         auto src = srcAddr[srcOffset >> 3];
         src = src >> (srcOffset & 7) | 0xfe; // get the bit in bit 0, other bits set to 1
 #if defined(__x86_64__)
@@ -602,7 +615,7 @@ arrow::Status VeloxHashBasedShuffleWriter::splitBoolType(
 #endif
         dst = dst & src; // only take the useful bit.
       }
-      dstaddr[dstOffset >> 3] = dst;
+      dstAddr[dstOffset >> 3] = dst;
       if (r == size) {
         continue;
       }
@@ -610,40 +623,40 @@ arrow::Status VeloxHashBasedShuffleWriter::splitBoolType(
       // now dst_offset is 8 aligned
       for (; r + 8 < size; r += 8) {
         uint8_t src = 0;
-        auto srcOffset = rowOffset2RowId_[r]; /*16k*/
+        auto srcOffset = rowOffset2RowId[r]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         // PREFETCHT0((&(srcAddr)[(srcOffset >> 3) + 64]));
         dst = src >> (srcOffset & 7) | 0xfe; // get the bit in bit 0, other bits set to 1
 
-        srcOffset = rowOffset2RowId_[r + 1]; /*16k*/
+        srcOffset = rowOffset2RowId[r + 1]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         dst &= src >> (srcOffset & 7) << 1 | 0xfd; // get the bit in bit 0, other bits set to 1
 
-        srcOffset = rowOffset2RowId_[r + 2]; /*16k*/
+        srcOffset = rowOffset2RowId[r + 2]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         dst &= src >> (srcOffset & 7) << 2 | 0xfb; // get the bit in bit 0, other bits set to 1
 
-        srcOffset = rowOffset2RowId_[r + 3]; /*16k*/
+        srcOffset = rowOffset2RowId[r + 3]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         dst &= src >> (srcOffset & 7) << 3 | 0xf7; // get the bit in bit 0, other bits set to 1
 
-        srcOffset = rowOffset2RowId_[r + 4]; /*16k*/
+        srcOffset = rowOffset2RowId[r + 4]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         dst &= src >> (srcOffset & 7) << 4 | 0xef; // get the bit in bit 0, other bits set to 1
 
-        srcOffset = rowOffset2RowId_[r + 5]; /*16k*/
+        srcOffset = rowOffset2RowId[r + 5]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         dst &= src >> (srcOffset & 7) << 5 | 0xdf; // get the bit in bit 0, other bits set to 1
 
-        srcOffset = rowOffset2RowId_[r + 6]; /*16k*/
+        srcOffset = rowOffset2RowId[r + 6]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         dst &= src >> (srcOffset & 7) << 6 | 0xbf; // get the bit in bit 0, other bits set to 1
 
-        srcOffset = rowOffset2RowId_[r + 7]; /*16k*/
+        srcOffset = rowOffset2RowId[r + 7]; /*16k*/
         src = srcAddr[srcOffset >> 3];
         dst &= src >> (srcOffset & 7) << 7 | 0x7f; // get the bit in bit 0, other bits set to 1
 
-        dstaddr[dstOffset >> 3] = dst;
+        dstAddr[dstOffset >> 3] = dst;
         dstOffset += 8;
         //_mm_prefetch(dstaddr + (dst_offset >> 3) + 64, _MM_HINT_T0);
       }
@@ -651,7 +664,7 @@ arrow::Status VeloxHashBasedShuffleWriter::splitBoolType(
       dst = 0xff;
       dstIdxByte = 0;
       for (; r < size; r++, dstIdxByte++) {
-        auto srcOffset = rowOffset2RowId_[r]; /*16k*/
+        auto srcOffset = rowOffset2RowId[r]; /*16k*/
         auto src = srcAddr[srcOffset >> 3];
         src = src >> (srcOffset & 7) | 0xfe; // get the bit in bit 0, other bits set to 1
 #if defined(__x86_64__)
@@ -661,61 +674,65 @@ arrow::Status VeloxHashBasedShuffleWriter::splitBoolType(
 #endif
         dst = dst & src; // only take the useful bit.
       }
-      dstaddr[dstOffset >> 3] = dst;
+      dstAddr[dstOffset >> 3] = dst;
     }
   }
   return arrow::Status::OK();
 }
 
-arrow::Status VeloxHashBasedShuffleWriter::splitValidityBuffer(const facebook::velox::RowVector& rv) {
+arrow::Status VeloxHashBasedShuffleWriter::splitValidityBuffer() {
   for (size_t col = 0; col < simpleColumnIndices_.size(); ++col) {
     auto colIdx = simpleColumnIndices_[col];
-    auto& column = rv.childAt(colIdx);
-    if (vectorHasNull(column)) {
-      auto& dstAddrs = partitionValidityAddrs_[col];
-      for (auto& pid : currentPartitionInUse_) {
-        if (dstAddrs[pid] == nullptr) {
-          // Init bitmap if it's null.
-          ARROW_ASSIGN_OR_RAISE(
-              auto validityBuffer,
-              arrow::AllocateResizableBuffer(
-                  arrow::bit_util::BytesForBits(partitionBufferSize_[pid]), partitionBufferPool_.get()));
-          dstAddrs[pid] = const_cast<uint8_t*>(validityBuffer->data());
-          memset(validityBuffer->mutable_data(), 0xff, validityBuffer->capacity());
-          partitionBuffers_[col][pid][kValidityBufferIndex] = std::move(validityBuffer);
+    auto& dstAddrs = partitionValidityAddrs_[col];
+    for (auto i = 0; i < numInputs_; ++i) {
+      const auto& rv = inputs_[i];
+      auto& column = rv->childAt(colIdx);
+      if (vectorHasNull(column)) {
+        for (auto& pid : currentPartitionInUse_[i]) {
+          if (dstAddrs[pid] == nullptr) {
+            // Init bitmap if it's null.
+            ARROW_ASSIGN_OR_RAISE(
+                auto validityBuffer,
+                arrow::AllocateResizableBuffer(
+                    arrow::bit_util::BytesForBits(partitionBufferSize_[pid]), partitionBufferPool_.get()));
+            dstAddrs[pid] = const_cast<uint8_t*>(validityBuffer->data());
+            memset(validityBuffer->mutable_data(), 0xff, validityBuffer->capacity());
+            partitionBuffers_[col][pid][kValidityBufferIndex] = std::move(validityBuffer);
+          }
         }
+        auto srcAddr = (const uint8_t*)(column->mutableRawNulls());
+        RETURN_NOT_OK(splitBoolType(i, srcAddr, dstAddrs));
       }
-
-      auto srcAddr = (const uint8_t*)(column->mutableRawNulls());
-      RETURN_NOT_OK(splitBoolType(srcAddr, dstAddrs));
     }
   }
   return arrow::Status::OK();
 }
 
 arrow::Status VeloxHashBasedShuffleWriter::splitBinaryType(
+    uint32_t index,
     uint32_t binaryIdx,
     const facebook::velox::FlatVector<facebook::velox::StringView>& src,
     std::vector<BinaryBuf>& dst) {
   const auto* srcRawValues = src.rawValues();
   const auto* srcRawNulls = src.rawNulls();
 
-  for (auto& pid : currentPartitionInUse_) {
+  for (auto& pid : currentPartitionInUse_[index]) {
     auto& binaryBuf = dst[pid];
 
     // use 32bit offset
-    auto dstLengthBase = (BinaryArrayLengthBufferType*)(binaryBuf.lengthPtr) + partitionBufferWritePos_[pid];
+    auto dstLengthBase =
+        (BinaryArrayLengthBufferType*)(binaryBuf.lengthPtr) + currentPartitionBufferWritePos_[index][pid];
 
     auto valueOffset = binaryBuf.valueOffset;
     auto dstValuePtr = binaryBuf.valuePtr + valueOffset;
     auto capacity = binaryBuf.valueCapacity;
 
-    auto rowOffsetBase = partition2RowOffsetBase_[pid];
-    auto numRows = partitionNumRows_.front()[pid];
+    auto rowOffsetBase = partition2RowOffsetBase_[index][pid];
+    auto numRows = partitionNumRows_[index][pid];
     auto multiply = 1;
 
     for (auto i = 0; i < numRows; i++) {
-      auto rowId = rowOffset2RowId_[rowOffsetBase + i];
+      auto rowId = rowOffset2RowId_[index][rowOffsetBase + i];
       auto& stringView = srcRawValues[rowId];
       size_t isNull = srcRawNulls && facebook::velox::bits::isBitNull(srcRawNulls, rowId);
       auto stringLen = (isNull - 1) & stringView.size();
@@ -742,7 +759,8 @@ arrow::Status VeloxHashBasedShuffleWriter::splitBinaryType(
         binaryBuf.valueCapacity = capacity;
         dstValuePtr = binaryBuf.valuePtr + valueOffset - stringLen;
         // Need to update dstLengthBase because lengthPtr can be updated if Reserve triggers spill.
-        dstLengthBase = (BinaryArrayLengthBufferType*)(binaryBuf.lengthPtr) + partitionBufferWritePos_[pid];
+        dstLengthBase =
+            (BinaryArrayLengthBufferType*)(binaryBuf.lengthPtr) + currentPartitionBufferWritePos_[index][pid];
       }
 
       // 2. copy value
@@ -756,50 +774,47 @@ arrow::Status VeloxHashBasedShuffleWriter::splitBinaryType(
   return arrow::Status::OK();
 }
 
-arrow::Status VeloxHashBasedShuffleWriter::splitBinaryArray(const facebook::velox::RowVector& rv) {
-  for (auto col = fixedWidthColumnCount_; col < simpleColumnIndices_.size(); ++col) {
-    auto binaryIdx = col - fixedWidthColumnCount_;
-    auto& dstAddrs = partitionBinaryAddrs_[binaryIdx];
-    auto colIdx = simpleColumnIndices_[col];
-    auto column = rv.childAt(colIdx)->asFlatVector<facebook::velox::StringView>();
-    RETURN_NOT_OK(splitBinaryType(binaryIdx, *column, dstAddrs));
+arrow::Status VeloxHashBasedShuffleWriter::splitBinaryArray() {
+  for (auto col = 0; col < binaryColumnIndices_.size(); ++col) {
+    auto& dstAddrs = partitionBinaryAddrs_[col];
+    auto& columns = splitChunks_.binaryColumns[col];
+    for (auto i = 0; i < numInputs_; ++i) {
+      auto column = std::move(columns.front());
+      columns.pop_front();
+      auto vector = column->asFlatVector<facebook::velox::StringView>();
+      RETURN_NOT_OK(splitBinaryType(i, col, *vector, dstAddrs));
+    }
   }
   return arrow::Status::OK();
 }
 
-arrow::Status VeloxHashBasedShuffleWriter::splitComplexType(const facebook::velox::RowVector& rv) {
+arrow::Status VeloxHashBasedShuffleWriter::splitComplexType() {
   if (complexColumnIndices_.size() == 0) {
     return arrow::Status::OK();
   }
-  auto numRows = rv.size();
-  std::vector<std::vector<facebook::velox::IndexRange>> rowIndexs;
-  rowIndexs.resize(numPartitions_);
-  // TODO: maybe an estimated row is more reasonable
-  for (auto row = 0; row < numRows; ++row) {
-    auto partition = row2Partition_.front()[row];
-    if (complexTypeData_[partition] == nullptr) {
-      // TODO: maybe memory issue, copy many times
-      if (arenas_[partition] == nullptr) {
-        arenas_[partition] = std::make_unique<facebook::velox::StreamArena>(veloxPool_.get());
+  for (auto i = 0; i < numInputs_; ++i) {
+    auto rowVector = std::move(splitChunks_.complexColumns.front());
+    splitChunks_.complexColumns.pop_front();
+    std::vector<std::vector<facebook::velox::IndexRange>> rowIndexs;
+    rowIndexs.resize(numPartitions_);
+    // TODO: maybe an estimated row is more reasonable
+    for (auto row = 0; row < rowVector->size(); ++row) {
+      auto partition = row2Partition_[i][row];
+      if (complexTypeData_[partition] == nullptr) {
+        // TODO: maybe memory issue, copy many times
+        if (arenas_[partition] == nullptr) {
+          arenas_[partition] = std::make_unique<facebook::velox::StreamArena>(veloxPool_.get());
+        }
+        complexTypeData_[partition] = serde_.createIterativeSerializer(
+            complexWriteType_, partitionNumRows_[i][partition], arenas_[partition].get(), &serdeOptions_);
       }
-      complexTypeData_[partition] = serde_.createIterativeSerializer(
-          complexWriteType_, partitionNumRows_.front()[partition], arenas_[partition].get(), &serdeOptions_);
+      rowIndexs[partition].emplace_back(facebook::velox::IndexRange{row, 1});
     }
-    rowIndexs[partition].emplace_back(facebook::velox::IndexRange{row, 1});
-  }
 
-  std::vector<facebook::velox::VectorPtr> children;
-  children.reserve(complexColumnIndices_.size());
-  for (size_t i = 0; i < complexColumnIndices_.size(); ++i) {
-    auto colIdx = complexColumnIndices_[i];
-    children.emplace_back(rv.childAt(colIdx));
-  }
-  auto rowVector = std::make_shared<facebook::velox::RowVector>(
-      veloxPool_.get(), complexWriteType_, facebook::velox::BufferPtr(nullptr), rv.size(), std::move(children));
-
-  for (auto& pid : currentPartitionInUse_) {
-    if (rowIndexs[pid].size() != 0) {
-      complexTypeData_[pid]->append(rowVector, folly::Range(rowIndexs[pid].data(), rowIndexs[pid].size()));
+    for (auto& pid : currentPartitionInUse_[i]) {
+      if (rowIndexs[pid].size() != 0) {
+        complexTypeData_[pid]->append(rowVector, folly::Range(rowIndexs[pid].data(), rowIndexs[pid].size()));
+      }
     }
   }
 
@@ -872,6 +887,9 @@ arrow::Status VeloxHashBasedShuffleWriter::initFromRowVector(const facebook::vel
   RETURN_NOT_OK(initColumnTypes(rv));
   RETURN_NOT_OK(initPartitions());
   calculateSimpleColumnBytes();
+  if (options_.partitioning != Partitioning::kSingle) {
+    initSplitChunks();
+  }
   return arrow::Status::OK();
 }
 
@@ -930,8 +948,8 @@ uint32_t VeloxHashBasedShuffleWriter::calculatePartitionBufferSize(int64_t memLi
       memLimit > 0 && bytesPerRow > 0 ? memLimit / bytesPerRow / numPartitionsInUse >> 2 : options_.bufferSize;
   preAllocRowCnt = std::min(preAllocRowCnt, (uint64_t)options_.bufferSize);
 
-  DLOG(INFO) << "Calculated partition buffer size -  memLimit: " << memLimit << ", bytesPerRow: " << bytesPerRow
-             << ", preAllocRowCnt: " << preAllocRowCnt << std::endl;
+  LOG(WARNING) << "Calculated partition buffer size -  memLimit: " << memLimit << ", bytesPerRow: " << bytesPerRow
+               << ", preAllocRowCnt: " << preAllocRowCnt << ", partitionInUse: " << numPartitionsInUse;
 
   maxBatchSize_ = preAllocRowCnt == 0 ? numPartitionsInUse : preAllocRowCnt * numPartitionsInUse;
 
@@ -1523,6 +1541,50 @@ arrow::Status VeloxHashBasedShuffleWriter::computePartitionId(
   RETURN_NOT_OK(partitioner_->compute(rawPidArr, size, row2Partition, partitionNumRows));
   END_TIMING();
   return arrow::Status::OK();
+}
+
+void VeloxHashBasedShuffleWriter::buildSplitChunks() {
+  numInputs_ = inputs_.size();
+  for (auto i = 0; i < numInputs_; ++i) {
+    for (auto col = 0; col < fixedWidthColumnCount_; ++col) {
+      splitChunks_.fixedWidthColumns[col].emplace_back(inputs_[i]->childAt(simpleColumnIndices_[col]));
+    }
+    for (auto col = 0; col < binaryColumnIndices_.size(); ++col) {
+      splitChunks_.binaryColumns[col].emplace_back(inputs_[i]->childAt(binaryColumnIndices_[col]));
+    }
+    // Construct RowVector with complex type columns.
+    std::vector<facebook::velox::VectorPtr> children;
+    children.reserve(complexColumnIndices_.size());
+    for (size_t col = 0; col < complexColumnIndices_.size(); ++col) {
+      children.emplace_back(inputs_[i]->childAt(complexColumnIndices_[col]));
+    }
+    auto rowVector = std::make_shared<facebook::velox::RowVector>(
+        veloxPool_.get(),
+        complexWriteType_,
+        facebook::velox::BufferPtr(nullptr),
+        inputs_[i]->size(),
+        std::move(children));
+    splitChunks_.complexColumns.emplace_back(std::move(rowVector));
+  }
+}
+
+void VeloxHashBasedShuffleWriter::initSplitChunks() {
+  splitChunks_.fixedWidthColumns.resize(fixedWidthColumnCount_);
+  splitChunks_.binaryColumns.resize(binaryColumnIndices_.size());
+}
+
+void VeloxHashBasedShuffleWriter::buildPartitionBufferWritePos() {
+  currentPartitionBufferWritePos_.resize(numInputs_);
+  currentPartitionBufferWritePos_[0].resize(numPartitions_);
+  fastCopy(
+      currentPartitionBufferWritePos_[0].data(), partitionBufferWritePos_.data(), sizeof(uint32_t) * numPartitions_);
+  for (auto i = 1; i < numInputs_; ++i) {
+    currentPartitionBufferWritePos_[i].resize(numPartitions_);
+    for (auto pid : partitionInUse_) {
+      currentPartitionBufferWritePos_[i][pid] =
+          currentPartitionBufferWritePos_[i - 1][pid] + partitionNumRows_[i - 1][pid];
+    }
+  }
 }
 
 } // namespace gluten
