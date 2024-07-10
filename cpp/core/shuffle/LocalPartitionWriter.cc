@@ -552,11 +552,33 @@ arrow::Status LocalPartitionWriter::evict(uint32_t partitionId, int64_t rawSize,
   lastEvictPid_ = partitionId;
 
   RETURN_NOT_OK(requestSpill());
+  auto rawData = reinterpret_cast<const uint8_t*>(data);
   auto buffer = std::make_shared<arrow::Buffer>(reinterpret_cast<const uint8_t*>(data), length);
-  ARROW_ASSIGN_OR_RAISE(
-      auto payload, BlockPayload::fromBuffers(Payload::kRaw, 0, {std::move(buffer)}, nullptr, nullptr, nullptr));
+  std::unique_ptr<BlockPayload> payload;
+  if (rawSize == length) {
+    if (codec_) {
+      auto maxCompressedLength = codec_->MaxCompressedLen(length, rawData);
+      std::shared_ptr<arrow::ResizableBuffer> compressed;
+      ARROW_ASSIGN_OR_RAISE(
+          compressed, arrow::AllocateResizableBuffer(maxCompressedLength + 2 * sizeof(int64_t), payloadPool_.get()));
+      // Compress.
+      ARROW_ASSIGN_OR_RAISE(
+          auto compressedLength,
+          codec_->Compress(length, rawData, maxCompressedLength, compressed->mutable_data() + 2 * sizeof(int64_t)));
+      memcpy(compressed->mutable_data(), &compressedLength, sizeof(int64_t));
+      memcpy(compressed->mutable_data() + sizeof(int64_t), &length, sizeof(int64_t));
+      auto sliced = arrow::SliceBuffer(compressed, 0, compressedLength + 2 * sizeof(int64_t));
+      ARROW_ASSIGN_OR_RAISE(
+          payload, BlockPayload::fromBuffers(Payload::kRaw, 0, {std::move(sliced)}, nullptr, nullptr, nullptr));
+    } else {
+      ARROW_ASSIGN_OR_RAISE(
+          payload, BlockPayload::fromBuffers(Payload::kRaw, 0, {std::move(buffer)}, nullptr, nullptr, nullptr));
+    }
+  } else {
+    ARROW_ASSIGN_OR_RAISE(
+        payload, BlockPayload::fromBuffers(Payload::kRaw, 0, {std::move(buffer)}, nullptr, nullptr, nullptr));
+  }
   RETURN_NOT_OK(spiller_->spill(partitionId, std::move(payload)));
-
   return arrow::Status::OK();
 }
 

@@ -816,8 +816,8 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleWriterJniWrappe
   auto shuffleWriterType = std::string(shuffleWriterTypeC);
   env->ReleaseStringUTFChars(shuffleWriterTypeJstr, shuffleWriterTypeC);
 
-  if (shuffleWriterType == "sort") {
-    shuffleWriterOptions.shuffleWriterType = kSortShuffle;
+  if (shuffleWriterType == "sort" && shuffleWriterOptions.partitioning != gluten::Partitioning::kSingle) {
+    shuffleWriterOptions.shuffleWriterType = kSortShuffleV2;
   }
 
   // Build PartitionWriterOptions.

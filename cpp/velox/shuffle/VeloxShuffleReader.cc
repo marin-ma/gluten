@@ -28,11 +28,13 @@
 #include "utils/Timer.h"
 #include "utils/VeloxArrowUtils.h"
 #include "utils/macros.h"
+#include "velox/row/CompactRow.h"
 #include "velox/serializers/PrestoSerializer.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/FlatVector.h"
 #include "velox/vector/arrow/Bridge.h"
 
+#include <algorithm>
 #include <iostream>
 
 // using namespace facebook;
@@ -402,9 +404,19 @@ std::unique_ptr<ColumnarBatchIterator> VeloxColumnarBatchDeserializerFactory::cr
         hasComplexType_,
         deserializeTime_,
         decompressTime_);
+  } else if (shuffleWriterType_ == kSortShuffle) {
+    return std::make_unique<VeloxShuffleReaderOutStreamWrapper>(
+        veloxPool_, rowType_, batchSize_, veloxCompressionType_, deserializeTime_, std::move(in));
   }
-  return std::make_unique<VeloxShuffleReaderOutStreamWrapper>(
-      veloxPool_, rowType_, batchSize_, veloxCompressionType_, deserializeTime_, std::move(in));
+  return std::make_unique<VeloxRowVectorDeserializer>(
+      std::move(in),
+      schema_,
+      codec_,
+      rowType_,
+      batchSize_,
+      memoryPool_,
+      veloxPool_,
+      deserializeTime_);
 }
 
 VeloxShuffleReaderOutStreamWrapper::VeloxShuffleReaderOutStreamWrapper(
@@ -518,5 +530,121 @@ void VeloxInputStream::next(bool throwIfPastEnd) {
     VELOX_CHECK_LT(0, realBytes, "Reading past end of file.");
     setRange({buffer_->asMutable<uint8_t>(), realBytes, 0});
   }
+}
+
+VeloxRowVectorDeserializer::VeloxRowVectorDeserializer(
+    std::shared_ptr<arrow::io::InputStream> in,
+    const std::shared_ptr<arrow::Schema>& schema,
+    const std::shared_ptr<arrow::util::Codec>& codec,
+    const RowTypePtr& rowType,
+    int32_t batchSize,
+    arrow::MemoryPool* memoryPool,
+    std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool,
+    int64_t& deserializeTime)
+    : in_(std::move(in)),
+      schema_(schema),
+      codec_(codec),
+      rowType_(rowType),
+      batchSize_(batchSize),
+      arrowPool_(memoryPool),
+      veloxPool_(veloxPool),
+      deserializeTime_(deserializeTime) {}
+
+std::shared_ptr<ColumnarBatch> VeloxRowVectorDeserializer::next() {
+  if (reachEos_) {
+    if (cachedRows_ > 0) {
+      return deserializeToBatch();
+    }
+    return nullptr;
+  }
+
+  if (cachedRows_ >= batchSize_) {
+    return deserializeToBatch();
+  }
+
+  while (cachedRows_ < batchSize_) {
+    if (codec_) {
+      int64_t compressedLength;
+      GLUTEN_ASSIGN_OR_THROW(auto bytes, in_->Read(sizeof(compressedLength), &compressedLength));
+      if (bytes == 0) {
+        reachEos_ = true;
+        if (cachedRows_ > 0) {
+          return deserializeToBatch();
+        }
+        return nullptr;
+      }
+      int64_t uncompressedLength;
+      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(sizeof(uncompressedLength), &uncompressedLength));
+      GLUTEN_ASSIGN_OR_THROW(auto compressed, arrow::AllocateResizableBuffer(compressedLength, arrowPool_));
+      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(compressedLength, compressed->mutable_data()));
+      VELOX_CHECK_EQ(bytes, compressedLength);
+
+      std::shared_ptr<arrow::ResizableBuffer> uncompressed;
+      GLUTEN_ASSIGN_OR_THROW(uncompressed, arrow::AllocateResizableBuffer(uncompressedLength, arrowPool_));
+      GLUTEN_ASSIGN_OR_THROW(
+          bytes,
+          codec_->Decompress(compressedLength, compressed->data(), uncompressedLength, uncompressed->mutable_data()));
+
+      auto data = uncompressed->mutable_data();
+      auto numRows = *(uint32_t*)data;
+      auto bufferSize = *(size_t*)(data + sizeof(numRows));
+      auto buffer = arrow::SliceBuffer(uncompressed, sizeof(numRows) + sizeof(bufferSize), bufferSize);
+      cachedInputs_.emplace_back(numRows, wrapInBufferViewAsOwner(buffer->data(), buffer->size(), buffer));
+      cachedRows_ += numRows;
+    } else {
+      uint32_t numRows;
+      GLUTEN_ASSIGN_OR_THROW(auto bytes, in_->Read(sizeof(numRows), &numRows));
+      if (bytes == 0) {
+        reachEos_ = true;
+        if (cachedRows_ > 0) {
+          return deserializeToBatch();
+        }
+        return nullptr;
+      }
+      uint64_t bufferSize;
+      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(sizeof(bufferSize), &bufferSize));
+      auto buffer = facebook::velox::AlignedBuffer::allocate<char>(bufferSize, veloxPool_.get());
+      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(bufferSize, buffer->asMutable<void>()));
+      cachedInputs_.emplace_back(numRows, std::move(buffer));
+      cachedRows_ += numRows;
+    }
+  }
+  return deserializeToBatch();
+}
+
+std::shared_ptr<ColumnarBatch> VeloxRowVectorDeserializer::deserializeToBatch() {
+  ScopedTimer timer(&deserializeTime_);
+  std::vector<std::string_view> data;
+  data.reserve(std::min(cachedRows_, batchSize_));
+
+  uint32_t accumRows = 0;
+  auto nextRows = cachedInputs_.front().first;
+  auto cur = cachedInputs_.begin();
+  while (cur != cachedInputs_.end() && accumRows + nextRows <= batchSize_) {
+    auto buffer = cur->second;
+    cachedRows_ -= nextRows;
+    accumRows += nextRows;
+
+    size_t offset = 0;
+    const auto* rawBuffer = buffer->as<char>();
+    for (auto i = 0; i < nextRows; ++i) {
+      auto rowSize = (size_t*)(rawBuffer + offset);
+      offset += sizeof(size_t);
+      data.push_back(std::string_view(rawBuffer + offset, *rowSize));
+      offset += *rowSize;
+    }
+    if (++cur != cachedInputs_.end()) {
+      nextRows = cur->first;
+    } else {
+      nextRows = 0;
+    }
+  }
+  auto rowVector = facebook::velox::row::CompactRow::deserialize(data, rowType_, veloxPool_.get());
+  // Free memory.
+  auto iter = cachedInputs_.begin();
+  while (iter++ != cur) {
+    cachedInputs_.pop_front();
+  }
+  return std::make_shared<VeloxColumnarBatch>(std::move(rowVector));
 }
 } // namespace gluten
