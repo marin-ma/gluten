@@ -816,7 +816,7 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleWriterJniWrappe
   auto shuffleWriterType = std::string(shuffleWriterTypeC);
   env->ReleaseStringUTFChars(shuffleWriterTypeJstr, shuffleWriterTypeC);
 
-  if (shuffleWriterType == "sort" && shuffleWriterOptions.partitioning != gluten::Partitioning::kSingle) {
+  if (shuffleWriterType == "sort") {
     shuffleWriterOptions.shuffleWriterType = kSortShuffleV2;
   }
 
@@ -1036,7 +1036,7 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
   // TODO: Add coalesce option and maximum coalesced size.
 
   if (jStringToCString(env, shuffleWriterType) == "sort") {
-    options.shuffleWriterType = kSortShuffle;
+    options.shuffleWriterType = kSortShuffleV2;
   }
   std::shared_ptr<arrow::Schema> schema =
       gluten::arrowGetOrThrow(arrow::ImportSchema(reinterpret_cast<struct ArrowSchema*>(cSchema)));

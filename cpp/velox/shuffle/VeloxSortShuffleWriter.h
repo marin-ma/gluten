@@ -55,13 +55,17 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   arrow::Result<facebook::velox::RowVectorPtr> getPeeledRowVector(const std::shared_ptr<ColumnarBatch>& cb);
 
-  void insert(facebook::velox::RowVectorPtr vector);
+  void insert(const facebook::velox::RowVectorPtr& vector);
 
   arrow::Status evictAllPartitions();
 
   arrow::Status evictPartition(uint32_t partitionId, size_t begin, size_t end);
 
+  arrow::Status spillIfNeeded(int64_t memLimit);
+
   uint16_t numInputs_{0};
+  uint64_t totalBytes_{0};
+  uint64_t totalRows_{0};
   // Stores inputs in row format.
   std::vector<facebook::velox::BufferPtr> rowBuffer_;
   // Stores compact row id -> row

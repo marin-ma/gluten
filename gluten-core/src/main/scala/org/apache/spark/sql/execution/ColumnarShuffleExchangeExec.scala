@@ -53,7 +53,7 @@ case class ColumnarShuffleExchangeExec(
   private[sql] lazy val readMetrics =
     SQLColumnarShuffleReadMetricsReporter.createShuffleReadMetrics(sparkContext)
 
-  val isSortBasedShuffle: Boolean =
+  private val enableSortBasedShuffle: Boolean = outputPartitioning != SinglePartition &&
     outputPartitioning.numPartitions > GlutenConfig.getConf.columnarShuffleSortThreshold
 
   // Note: "metrics" is made transient to avoid sending driver-side metrics to tasks.
@@ -61,7 +61,7 @@ case class ColumnarShuffleExchangeExec(
     BackendsApiManager.getMetricsApiInstance
       .genColumnarShuffleExchangeMetrics(
         sparkContext,
-        isSortBasedShuffle) ++ readMetrics ++ writeMetrics
+        enableSortBasedShuffle) ++ readMetrics ++ writeMetrics
 
   @transient lazy val inputColumnarRDD: RDD[ColumnarBatch] = child.executeColumnar()
 
@@ -89,7 +89,7 @@ case class ColumnarShuffleExchangeExec(
       serializer,
       writeMetrics,
       metrics,
-      isSortBasedShuffle)
+      enableSortBasedShuffle)
   }
 
   // 'shuffleDependency' is only needed when enable AQE.
@@ -110,7 +110,7 @@ case class ColumnarShuffleExchangeExec(
 
   // super.stringArgs ++ Iterator(output.map(o => s"${o}#${o.dataType.simpleString}"))
   val serializer: Serializer = BackendsApiManager.getSparkPlanExecApiInstance
-    .createColumnarBatchSerializer(schema, metrics, isSortBasedShuffle)
+    .createColumnarBatchSerializer(schema, metrics, enableSortBasedShuffle)
 
   var cachedShuffleRDD: ShuffledColumnarBatchRDD = _
 

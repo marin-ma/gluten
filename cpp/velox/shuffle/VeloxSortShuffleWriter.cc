@@ -58,7 +58,7 @@ VeloxSortShuffleWriter::VeloxSortShuffleWriter(
   VELOX_CHECK(options_.partitioning != Partitioning::kSingle)
 }
 
-void VeloxSortShuffleWriter::insert(facebook::velox::RowVectorPtr vector) {
+void VeloxSortShuffleWriter::insert(const facebook::velox::RowVectorPtr& vector) {
   auto numRows = vector->size();
   VELOX_DCHECK_GT(numRows, 0);
 
@@ -72,6 +72,11 @@ void VeloxSortShuffleWriter::insert(facebook::velox::RowVectorPtr vector) {
       totalSize += row.rowSize(i);
     }
   }
+
+  totalRows_ += numRows;
+  totalBytes_ += totalSize;
+  std::cout << "Allocating " << totalSize << " bytes, totalBytes: " << totalBytes_ << ", totalRows" << totalRows_
+            << ", numInputs: " << numInputs_ << std::endl;
   // Buffer allocation can trigger self-spill. Separate buffer allocation and rowBuffer_.emplace_back().
   auto buffer = facebook::velox::AlignedBuffer::allocate<char>(totalSize, veloxPool_.get(), 0);
   auto* rawBuffer = buffer->asMutable<char>();
@@ -92,11 +97,15 @@ arrow::Status VeloxSortShuffleWriter::write(std::shared_ptr<ColumnarBatch> cb, i
   ARROW_ASSIGN_OR_RAISE(auto rv, getPeeledRowVector(cb));
   initRowType(rv);
   insert(rv);
+  RETURN_NOT_OK(spillIfNeeded(memLimit));
   return arrow::Status::OK();
 }
 
 arrow::Status VeloxSortShuffleWriter::reclaimFixedSize(int64_t size, int64_t* actual) {
-  //  RETURN_NOT_OK(partitionWriter_->reclaimFixedSize(size, actual));
+  if (evictState_ == EvictState::kUnevictable) {
+    *actual = 0;
+    return arrow::Status::OK();
+  }
   auto beforeReclaim = veloxPool_->usedBytes();
   RETURN_NOT_OK(evictAllPartitions());
   *actual = beforeReclaim - veloxPool_->usedBytes();
@@ -105,6 +114,7 @@ arrow::Status VeloxSortShuffleWriter::reclaimFixedSize(int64_t size, int64_t* ac
 
 arrow::Status VeloxSortShuffleWriter::stop() {
   RETURN_NOT_OK(evictAllPartitions());
+  sortedBuffer_ = nullptr;
   RETURN_NOT_OK(partitionWriter_->stop(&metrics_));
   return arrow::Status::OK();
 }
@@ -117,31 +127,41 @@ arrow::Status VeloxSortShuffleWriter::evictPartition(uint32_t partitionId, size_
     rawSize += data_[i].second.length();
   }
 
-  // numRows | buffer size | buffer
+  // numRows(4) | rawSize(8) | buffer
   uint64_t actualSize = sizeof(uint32_t) + sizeof(rawSize) + rawSize;
   if (sortedBuffer_ == nullptr) {
     sortedBuffer_ = facebook::velox::AlignedBuffer::allocate<char>(actualSize, veloxPool_.get());
   } else if (sortedBuffer_->size() < actualSize) {
-    sortedBuffer_->setSize(actualSize);
+    facebook::velox::AlignedBuffer::reallocate<char>(&sortedBuffer_, actualSize);
   }
   auto* rawBuffer = sortedBuffer_->asMutable<char>();
-  memcpy(rawBuffer, &numRows, sizeof(numRows));
-  memcpy(rawBuffer + sizeof(numRows), &rawSize, sizeof(rawSize));
 
-  uint64_t offset = sizeof(numRows) + sizeof(rawSize);
+  uint64_t offset = 0;
+  memcpy(rawBuffer, &numRows, sizeof(numRows));
+  offset += sizeof(numRows);
+  memcpy(rawBuffer + offset, &rawSize, sizeof(rawSize));
+  offset += sizeof(rawSize);
+
   for (auto i = begin; i < end; ++i) {
+    // size(size_t) | bytes
     auto size = data_[i].second.size();
     memcpy(rawBuffer + offset, &size, sizeof(size_t));
     offset += sizeof(size_t);
     memcpy(rawBuffer + offset, data_[i].second.data(), size);
     offset += size;
   }
-  // TODO: compress this buffer.
+  VELOX_CHECK_EQ(offset, actualSize);
+
   RETURN_NOT_OK(partitionWriter_->evict(partitionId, actualSize, sortedBuffer_->as<char>(), actualSize));
   return arrow::Status::OK();
 }
 
 arrow::Status VeloxSortShuffleWriter::evictAllPartitions() {
+  if (evictState_ == EvictState::kUnevictable) {
+    return arrow::Status::OK();
+  }
+  EvictGuard evictGuard{evictState_};
+
   std::sort(data_.begin(), data_.end());
 
   size_t begin = 0;
@@ -160,6 +180,8 @@ arrow::Status VeloxSortShuffleWriter::evictAllPartitions() {
   data_.clear();
   rowBuffer_.clear();
   numInputs_ = 0;
+  totalBytes_ = 0;
+  totalRows_ = 0;
   return arrow::Status::OK();
 }
 
@@ -200,6 +222,12 @@ arrow::Result<facebook::velox::RowVectorPtr> VeloxSortShuffleWriter::getPeeledRo
       return rv;
     }
   }
-  throw GlutenException("Unreachable.");
+}
+
+arrow::Status VeloxSortShuffleWriter::spillIfNeeded(int64_t memLimit) {
+  if (totalBytes_ >= memLimit >> 2 || totalRows_ / numPartitions_ >= 10) {
+    RETURN_NOT_OK(evictAllPartitions());
+  }
+  return arrow::Status::OK();
 }
 } // namespace gluten

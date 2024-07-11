@@ -192,7 +192,7 @@ void runShuffle(
   {
     gluten::ScopedTimer timer(&totalTime);
     while (resultIter->hasNext()) {
-      GLUTEN_THROW_NOT_OK(shuffleWriter->write(resultIter->next(), std::numeric_limits<int64_t>::max()));
+      GLUTEN_THROW_NOT_OK(shuffleWriter->write(resultIter->next(), (1LL << 30) - shuffleWriter->cachedPayloadSize()));
     }
     GLUTEN_THROW_NOT_OK(shuffleWriter->stop());
   }

@@ -409,14 +409,7 @@ std::unique_ptr<ColumnarBatchIterator> VeloxColumnarBatchDeserializerFactory::cr
         veloxPool_, rowType_, batchSize_, veloxCompressionType_, deserializeTime_, std::move(in));
   }
   return std::make_unique<VeloxRowVectorDeserializer>(
-      std::move(in),
-      schema_,
-      codec_,
-      rowType_,
-      batchSize_,
-      memoryPool_,
-      veloxPool_,
-      deserializeTime_);
+      std::move(in), schema_, codec_, rowType_, batchSize_, memoryPool_, veloxPool_, deserializeTime_);
 }
 
 VeloxShuffleReaderOutStreamWrapper::VeloxShuffleReaderOutStreamWrapper(
@@ -617,28 +610,26 @@ std::shared_ptr<ColumnarBatch> VeloxRowVectorDeserializer::deserializeToBatch() 
   std::vector<std::string_view> data;
   data.reserve(std::min(cachedRows_, batchSize_));
 
-  uint32_t accumRows = 0;
-  auto nextRows = cachedInputs_.front().first;
+  uint32_t readRows = 0;
   auto cur = cachedInputs_.begin();
-  while (cur != cachedInputs_.end() && accumRows + nextRows <= batchSize_) {
+  while (readRows < batchSize_ && cur != cachedInputs_.end()) {
     auto buffer = cur->second;
-    cachedRows_ -= nextRows;
-    accumRows += nextRows;
-
-    size_t offset = 0;
     const auto* rawBuffer = buffer->as<char>();
-    for (auto i = 0; i < nextRows; ++i) {
-      auto rowSize = (size_t*)(rawBuffer + offset);
-      offset += sizeof(size_t);
-      data.push_back(std::string_view(rawBuffer + offset, *rowSize));
-      offset += *rowSize;
+    while (rowOffset_ < cur->first && readRows < batchSize_) {
+      auto rowSize = *(size_t*)(rawBuffer + byteOffset_);
+      byteOffset_ += sizeof(size_t);
+      data.push_back(std::string_view(rawBuffer + byteOffset_, rowSize));
+      byteOffset_ += rowSize;
+      ++rowOffset_;
+      ++readRows;
     }
-    if (++cur != cachedInputs_.end()) {
-      nextRows = cur->first;
-    } else {
-      nextRows = 0;
+    if (rowOffset_ == cur->first) {
+      rowOffset_ = 0;
+      byteOffset_ = 0;
+      ++cur;
     }
   }
+  cachedRows_ -= readRows;
   auto rowVector = facebook::velox::row::CompactRow::deserialize(data, rowType_, veloxPool_.get());
   // Free memory.
   auto iter = cachedInputs_.begin();

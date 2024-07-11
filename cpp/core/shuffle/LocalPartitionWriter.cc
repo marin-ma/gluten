@@ -553,7 +553,7 @@ arrow::Status LocalPartitionWriter::evict(uint32_t partitionId, int64_t rawSize,
 
   RETURN_NOT_OK(requestSpill());
   auto rawData = reinterpret_cast<const uint8_t*>(data);
-  auto buffer = std::make_shared<arrow::Buffer>(reinterpret_cast<const uint8_t*>(data), length);
+  auto buffer = std::make_shared<arrow::Buffer>(rawData, length);
   std::unique_ptr<BlockPayload> payload;
   if (rawSize == length) {
     if (codec_) {

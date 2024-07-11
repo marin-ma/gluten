@@ -95,6 +95,10 @@ static const auto kShuffleWriteTestParams = createShuffleTestParams();
 } // namespace
 
 TEST_P(SinglePartitioningShuffleWriter, single) {
+  if (GetParam().shuffleWriterType != ShuffleWriterType::kHashShuffle &&
+      GetParam().partitionWriterType == PartitionWriterType::kLocal) {
+    return;
+  }
   // Split 1 RowVector.
   {
     ASSERT_NOT_OK(initShuffleWriterOptions());

@@ -92,6 +92,9 @@ class VeloxRowVectorDeserializer final : public ColumnarBatchIterator {
   uint32_t cachedRows_{0};
   bool reachEos_{false};
 
+  uint32_t rowOffset_{0};
+  size_t byteOffset_{0};
+
   std::shared_ptr<ColumnarBatch> deserializeToBatch();
 };
 
