@@ -157,7 +157,7 @@ arrow::Status VeloxSortShuffleWriter::evictPartition(uint32_t partitionId, size_
 }
 
 arrow::Status VeloxSortShuffleWriter::evictAllPartitions() {
-  if (evictState_ == EvictState::kUnevictable) {
+  if (evictState_ == EvictState::kUnevictable || data_.empty()) {
     return arrow::Status::OK();
   }
   EvictGuard evictGuard{evictState_};
