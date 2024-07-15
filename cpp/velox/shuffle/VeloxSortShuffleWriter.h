@@ -66,16 +66,16 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   void acquireNewBuffer(int64_t memLimit, uint64_t minSizeRequired);
 
-  uint32_t
-  maxRowsToInsert(facebook::velox::row::CompactRow& row, size_t offset, uint32_t rows, uint64_t& minSizeRequired);
+  uint32_t maxRowsToInsert(uint32_t offset, uint32_t rows);
 
-  void insertRows(facebook::velox::row::CompactRow& row, size_t begin, size_t rows);
+  void insertRows(facebook::velox::row::CompactRow& row, uint32_t offset, uint32_t rows);
 
   uint16_t numInputs_{0};
   uint64_t writeOffset_{0};
   uint64_t totalRows_{0};
   // Stores inputs in row format.
-  std::list<std::unique_ptr<arrow::ResizableBuffer>> rowBuffer_;
+  facebook::velox::BufferPtr rowBuffer_;
+  std::list<facebook::velox::BufferPtr> cachedInputBuffer_;
   // Stores compact row id -> row
   std::vector<std::pair<uint64_t, std::string_view>> data_;
 
@@ -95,5 +95,6 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   std::shared_ptr<const facebook::velox::RowType> rowType_;
   std::optional<int32_t> fixedRowSize_;
+  std::vector<uint32_t> rowSizes_;
 };
 } // namespace gluten

@@ -57,61 +57,47 @@ VeloxSortShuffleWriter::VeloxSortShuffleWriter(
   VELOX_CHECK(options_.partitioning != Partitioning::kSingle);
 }
 
-void VeloxSortShuffleWriter::insertRows(facebook::velox::row::CompactRow& row, size_t begin, size_t rows) {
+void VeloxSortShuffleWriter::insertRows(facebook::velox::row::CompactRow& row, uint32_t offset, uint32_t rows) {
   data_.reserve(data_.size() + rows);
-  auto* rawBuffer = rowBuffer_.back()->mutable_data_as<char>();
-  for (auto i = begin; i < begin + rows; ++i) {
-    auto size = row.serialize(i, rawBuffer + writeOffset_);
-    data_.emplace_back(
-        toCompactRowId(row2Partition_[i], numInputs_, i), std::string_view(rawBuffer + writeOffset_, size));
-    writeOffset_ += size;
+  auto totalSize = fixedRowSize_ ? fixedRowSize_.value() * rows : rowSizes_[offset + rows] - rowSizes_[offset];
+  if (rowBuffer_ == nullptr || rowBuffer_->capacity() < totalSize) {
+    rowBuffer_ = facebook::velox::AlignedBuffer::allocate<char>(totalSize, veloxPool_.get());
   }
+  memset(rowBuffer_->asMutable<char>(), 0, totalSize);
+
+  size_t bytes = 0;
+  auto* rawBuffer = rowBuffer_->asMutable<char>();
+  auto* cachedRawBuffer = cachedInputBuffer_.back()->asMutable<char>() + writeOffset_;
+  for (auto i = offset; i < offset + rows; ++i) {
+    auto size = row.serialize(i, rawBuffer + bytes);
+    data_.emplace_back(
+        toCompactRowId(row2Partition_[i], numInputs_, i), std::string_view(cachedRawBuffer + bytes, size));
+    bytes += size;
+  }
+  writeOffset_ += bytes;
+  fastCopy(cachedRawBuffer, rawBuffer, bytes);
 }
 
-uint32_t VeloxSortShuffleWriter::maxRowsToInsert(
-    facebook::velox::row::CompactRow& row,
-    size_t offset,
-    uint32_t rows,
-    uint64_t& minSizeRequired) {
-  if (fixedRowSize_) {
-    minSizeRequired = fixedRowSize_.value();
-  } else {
-    minSizeRequired = row.rowSize(offset);
-  }
-
-  if (rowBuffer_.empty()) {
-    return 0;
-  }
-
+uint32_t VeloxSortShuffleWriter::maxRowsToInsert(uint32_t offset, uint32_t rows) {
   // Check how many rows can be handled.
-  auto remainingBytes = rowBuffer_.back()->size() - writeOffset_;
-  if (fixedRowSize_) {
-    return std::min(remainingBytes / fixedRowSize_.value(), rows - offset);
-  }
-
-  if (minSizeRequired > remainingBytes) {
+  if (cachedInputBuffer_.empty()) {
     return 0;
   }
-  size_t bytes = minSizeRequired;
-  for (auto i = offset + 1; i < rows; ++i) {
-    auto rowSize = row.rowSize(i);
-    bytes += rowSize;
-    if (bytes > remainingBytes) {
-      return i - offset;
-    }
+  auto remainingBytes = cachedInputBuffer_.back()->size() - writeOffset_;
+  if (fixedRowSize_) {
+    return std::min((uint32_t)(remainingBytes / fixedRowSize_.value()), rows);
   }
-  return rows - offset;
+  auto iter = std::upper_bound(rowSizes_.begin() + 1 + offset, rowSizes_.end(), remainingBytes);
+  return iter - rowSizes_.begin() - offset - 1;
 }
 
 void VeloxSortShuffleWriter::acquireNewBuffer(int64_t memLimit, uint64_t minSizeRequired) {
-  rowBuffer_.clear();
   auto initialSize = std::max(std::min((uint64_t)memLimit >> 2, 64UL * 1024 * 1024), minSizeRequired);
-  //  auto newBuffer = facebook::velox::AlignedBuffer::allocate<char>(initialSize, veloxPool_.get(), 0);
-  GLUTEN_ASSIGN_OR_THROW(auto newBuffer, arrow::AllocateResizableBuffer(initialSize, pool_));
+  auto newBuffer = facebook::velox::AlignedBuffer::allocate<char>(initialSize, veloxPool_.get(), 0);
   std::cout << "Allocate new buffer: " << initialSize << std::endl;
-  rowBuffer_.emplace_back(std::move(newBuffer));
+  cachedInputBuffer_.emplace_back(std::move(newBuffer));
   writeOffset_ = 0;
-  madvise(rowBuffer_.back()->mutable_data(), initialSize, MADV_HUGEPAGE | MADV_WILLNEED);
+  //  madvise(cachedInputBuffer_.back()->mutable_data(), initialSize, MADV_HUGEPAGE | MADV_WILLNEED);
 }
 
 arrow::Status VeloxSortShuffleWriter::insert(const facebook::velox::RowVectorPtr& vector, int64_t memLimit) {
@@ -120,22 +106,34 @@ arrow::Status VeloxSortShuffleWriter::insert(const facebook::velox::RowVectorPtr
 
   facebook::velox::row::CompactRow row(vector);
 
-  auto rowOffset = 0;
-  uint64_t minSizeRequired = 0;
+  if (!fixedRowSize_) {
+    rowSizes_.resize(inputRows + 1);
+    rowSizes_[0] = 0;
+    for (auto i = 0; i < inputRows; ++i) {
+      const size_t rowSize = row.rowSize(i);
+      rowSizes_[i + 1] = rowSizes_[i] + rowSize;
+    }
+  }
+
+  uint32_t rowOffset = 0;
   while (rowOffset < inputRows) {
-    auto rows = maxRowsToInsert(row, rowOffset, inputRows, minSizeRequired);
-    if (rows > 0) {
-      std::cout << rowOffset << " " << rows << " " << inputRows << std::endl;
-      insertRows(row, rowOffset, rows);
-      rowOffset += rows;
+    auto remainingRows = inputRows - rowOffset;
+    auto rows = maxRowsToInsert(rowOffset, remainingRows);
+    if (rows == 0) {
+      if (fixedRowSize_) {
+        acquireNewBuffer(memLimit, fixedRowSize_.value());
+      } else {
+        acquireNewBuffer(memLimit, rowSizes_[rowOffset + 1] - rowSizes_[rowOffset]);
+      }
+      rows = maxRowsToInsert(rowOffset, remainingRows);
     }
-    if (rowOffset < inputRows) {
-      acquireNewBuffer(memLimit, minSizeRequired);
-    }
+    std::cout << rowOffset << " " << rows << " " << inputRows << std::endl;
+    insertRows(row, rowOffset, rows);
+    rowOffset += rows;
   }
   ++numInputs_;
   totalRows_ += inputRows;
-  std::cout << "writeOffset: " << writeOffset_ << ", totalRows " << totalRows_ << ", numInputs: " << numInputs_
+  std::cout << "writeOffset: " << writeOffset_ << ", totalRows: " << totalRows_ << ", numInputs: " << numInputs_
             << std::endl;
   return arrow::Status::OK();
 }
@@ -161,7 +159,7 @@ arrow::Status VeloxSortShuffleWriter::reclaimFixedSize(int64_t size, int64_t* ac
 
 arrow::Status VeloxSortShuffleWriter::stop() {
   RETURN_NOT_OK(evictAllPartitions());
-  rowBuffer_.clear();
+  cachedInputBuffer_.clear();
   sortedBuffer_ = nullptr;
   RETURN_NOT_OK(partitionWriter_->stop(&metrics_));
   return arrow::Status::OK();
@@ -226,7 +224,7 @@ arrow::Status VeloxSortShuffleWriter::evictAllPartitions() {
   RETURN_NOT_OK(evictPartition(pid, begin, cur));
 
   data_.clear();
-  rowBuffer_.clear();
+  cachedInputBuffer_.clear();
   numInputs_ = 0;
   writeOffset_ = 0;
   totalRows_ = 0;
