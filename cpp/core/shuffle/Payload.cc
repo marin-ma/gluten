@@ -279,6 +279,9 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> BlockPayload::readBufferAt(uint32_
   if (type_ == Type::kCompressed) {
     return arrow::Status::Invalid("Cannot read buffer from compressed BlockPayload.");
   }
+  if (type_ == Type::kRaw && pos != 0) {
+    return arrow::Status::Invalid("Read buffer pos from raw should only be 0, but got " + std::to_string(pos));
+  }
   return std::move(buffers_[pos]);
 }
 
@@ -347,6 +350,11 @@ arrow::Result<std::vector<std::shared_ptr<arrow::Buffer>>> BlockPayload::deseria
 
 void BlockPayload::setCompressionTime(int64_t compressionTime) {
   compressTime_ = compressionTime;
+}
+
+uint64_t BlockPayload::rawSize() {
+  return std::accumulate(
+      buffers_.begin(), buffers_.end(), 0UL, [](auto sum, const auto& buffer) { return sum + buffer->size(); });
 }
 
 arrow::Result<std::unique_ptr<InMemoryPayload>> InMemoryPayload::merge(
@@ -457,6 +465,11 @@ arrow::Status InMemoryPayload::copyBuffers(arrow::MemoryPool* pool) {
   return arrow::Status::OK();
 }
 
+uint64_t InMemoryPayload::rawSize() {
+  return std::accumulate(
+      buffers_.begin(), buffers_.end(), 0UL, [](auto sum, const auto& buffer) { return sum + buffer->size(); });
+}
+
 UncompressedDiskBlockPayload::UncompressedDiskBlockPayload(
     Type type,
     uint32_t numRows,
@@ -517,6 +530,10 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> UncompressedDiskBlockPayload::read
   return buffer;
 }
 
+uint64_t UncompressedDiskBlockPayload::rawSize() {
+  return rawSize_;
+}
+
 CompressedDiskBlockPayload::CompressedDiskBlockPayload(
     uint32_t numRows,
     const std::vector<bool>* isValidityBuffer,
@@ -534,5 +551,9 @@ arrow::Status CompressedDiskBlockPayload::serialize(arrow::io::OutputStream* out
 
 arrow::Result<std::shared_ptr<arrow::Buffer>> CompressedDiskBlockPayload::readBufferAt(uint32_t index) {
   return arrow::Status::Invalid("Cannot read buffer from CompressedDiskBlockPayload.");
+}
+
+uint64_t CompressedDiskBlockPayload::rawSize() {
+  return rawSize_;
 }
 } // namespace gluten

@@ -580,7 +580,7 @@ std::shared_ptr<ColumnarBatch> VeloxRowVectorDeserializer::next() {
 
       auto data = uncompressed->mutable_data();
       auto numRows = *(uint32_t*)data;
-      auto bufferSize = *(size_t*)(data + sizeof(numRows));
+      auto bufferSize = *(uint64_t*)(data + sizeof(numRows));
       auto buffer = arrow::SliceBuffer(uncompressed, sizeof(numRows) + sizeof(bufferSize), bufferSize);
       cachedInputs_.emplace_back(numRows, wrapInBufferViewAsOwner(buffer->data(), buffer->size(), buffer));
       cachedRows_ += numRows;
@@ -616,8 +616,8 @@ std::shared_ptr<ColumnarBatch> VeloxRowVectorDeserializer::deserializeToBatch() 
     auto buffer = cur->second;
     const auto* rawBuffer = buffer->as<char>();
     while (rowOffset_ < cur->first && readRows < batchSize_) {
-      auto rowSize = *(size_t*)(rawBuffer + byteOffset_);
-      byteOffset_ += sizeof(size_t);
+      auto rowSize = *(uint32_t*)(rawBuffer + byteOffset_);
+      byteOffset_ += sizeof(uint32_t);
       data.push_back(std::string_view(rawBuffer + byteOffset_, rowSize));
       byteOffset_ += rowSize;
       ++rowOffset_;

@@ -42,7 +42,7 @@ class LocalPartitionWriter : public PartitionWriter {
       bool reuseBuffers,
       bool hasComplexType) override;
 
-  arrow::Status evict(uint32_t partitionId, int64_t rawSize, const char* data, int64_t length) override;
+  arrow::Status evict(uint32_t partitionId, std::unique_ptr<BlockPayload> blockPayload, bool stop) override;
 
   /// The stop function performs several tasks:
   /// 1. Opens the final data file.
@@ -80,7 +80,7 @@ class LocalPartitionWriter : public PartitionWriter {
  private:
   void init();
 
-  arrow::Status requestSpill();
+  arrow::Status requestSpill(bool stop);
 
   arrow::Status finishSpill();
 
@@ -94,10 +94,13 @@ class LocalPartitionWriter : public PartitionWriter {
 
   arrow::Status populateMetrics(ShuffleWriterMetrics* metrics);
 
+  bool useSpillFileAsDataFile();
+
   std::string dataFile_;
   std::vector<std::string> localDirs_;
 
   bool stopped_{false};
+  bool useSpillFileAsDataFile_{false};
   std::shared_ptr<LocalSpiller> spiller_{nullptr};
   std::shared_ptr<PayloadMerger> merger_{nullptr};
   std::shared_ptr<PayloadCache> payloadCache_{nullptr};

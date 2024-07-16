@@ -62,7 +62,7 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   arrow::Status evictPartition(uint32_t partitionId, size_t begin, size_t end);
 
-  arrow::Status spillIfNeeded(int64_t memLimit);
+  arrow::Status spillIfNeeded(int64_t memLimit, int32_t nextRows);
 
   void acquireNewBuffer(int64_t memLimit, uint64_t minSizeRequired);
 
@@ -70,14 +70,21 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   void insertRows(facebook::velox::row::CompactRow& row, uint32_t offset, uint32_t rows);
 
-  uint16_t numInputs_{0};
-  uint64_t writeOffset_{0};
-  uint64_t totalRows_{0};
-  // Stores inputs in row format.
-  facebook::velox::BufferPtr rowBuffer_;
-  std::list<facebook::velox::BufferPtr> cachedInputBuffer_;
+  using RowSize = uint32_t;
+
+  std::unique_ptr<arrow::util::Codec> codec_;
+
+  uint32_t numInputs_{0};
+  uint32_t pageCursor_{0};
+  uint32_t totalRows_{0};
+
+  std::vector<facebook::velox::BufferPtr> pages_;
+  std::vector<char*> pageAddresses_;
+  char* currentPage_;
+  uint32_t pageNumber_;
+
   // Stores compact row id -> row
-  std::vector<std::pair<uint64_t, std::string_view>> data_;
+  std::vector<std::pair<uint64_t, RowSize>> data_;
 
   facebook::velox::BufferPtr sortedBuffer_;
 
@@ -95,6 +102,9 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   std::shared_ptr<const facebook::velox::RowType> rowType_;
   std::optional<int32_t> fixedRowSize_;
-  std::vector<uint32_t> rowSizes_;
+  std::vector<uint64_t> rowSizes_;
+
+  int64_t convertTime_{0};
+  bool stopped_{false};
 };
 } // namespace gluten

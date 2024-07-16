@@ -74,10 +74,11 @@ arrow::Status RssPartitionWriter::evict(
   return arrow::Status::OK();
 }
 
-arrow::Status RssPartitionWriter::evict(uint32_t partitionId, int64_t rawSize, const char* data, int64_t length) {
-  rawPartitionLengths_[partitionId] += rawSize;
+arrow::Status RssPartitionWriter::evict(uint32_t partitionId, std::unique_ptr<BlockPayload> blockPayload, bool) {
+  rawPartitionLengths_[partitionId] += blockPayload->rawSize();
   ScopedTimer timer(&spillTime_);
-  bytesEvicted_[partitionId] += rssClient_->pushPartitionData(partitionId, data, length);
+  ARROW_ASSIGN_OR_RAISE(auto buffer, blockPayload->readBufferAt(0));
+  bytesEvicted_[partitionId] += rssClient_->pushPartitionData(partitionId, buffer->data_as<char>(), buffer->size());
   return arrow::Status::OK();
 }
 } // namespace gluten
