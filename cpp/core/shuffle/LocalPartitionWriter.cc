@@ -46,6 +46,7 @@ class LocalPartitionWriter::LocalSpiller {
     if (!opened_) {
       opened_ = true;
       ARROW_ASSIGN_OR_RAISE(os_, arrow::io::FileOutputStream::Open(spillFile_, true));
+      std::cout << "open spill file: " << spillFile_ << std::endl;
       diskSpill_ = std::make_unique<Spill>(Spill::SpillType::kSequentialSpill);
     }
 
@@ -492,11 +493,11 @@ arrow::Status LocalPartitionWriter::stop(ShuffleWriterMetrics* metrics) {
       }
       partitionLengths_[pid] = length;
     }
-    std::filesystem::rename(spill->spillFile(), dataFile_);
     totalBytesWritten_ = std::filesystem::file_size(dataFile_);
     writeTime_ = spillTime_;
     spillTime_ = 0;
-    std::cout << "Use spill file as data file" << std::endl;
+    std::cout << "Use spill file as data file: " << dataFile_ << std::endl;
+    std::cout << "Bytes written: " << totalBytesWritten_ << std::endl;
   }
   // Populate shuffle writer metrics.
   RETURN_NOT_OK(populateMetrics(metrics));
