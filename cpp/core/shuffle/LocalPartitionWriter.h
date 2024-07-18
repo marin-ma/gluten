@@ -40,7 +40,8 @@ class LocalPartitionWriter : public PartitionWriter {
       std::unique_ptr<InMemoryPayload> inMemoryPayload,
       Evict::type evictType,
       bool reuseBuffers,
-      bool hasComplexType) override;
+      bool hasComplexType,
+      bool isFinal) override;
 
   arrow::Status evict(uint32_t partitionId, std::unique_ptr<BlockPayload> blockPayload, bool stop) override;
 
@@ -80,7 +81,7 @@ class LocalPartitionWriter : public PartitionWriter {
  private:
   void init();
 
-  arrow::Status requestSpill(bool stop);
+  arrow::Status requestSpill(bool isFinal);
 
   arrow::Status finishSpill();
 

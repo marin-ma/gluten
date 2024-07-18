@@ -72,7 +72,8 @@ std::vector<ShuffleTestParams> createShuffleTestParams() {
   for (const auto& compression : compressions) {
     params.push_back(
         ShuffleTestParams{ShuffleWriterType::kSortShuffleV2, PartitionWriterType::kLocal, compression, 0, 0});
-    params.push_back(ShuffleTestParams{ShuffleWriterType::kSortShuffle, PartitionWriterType::kRss, compression, 0, 0});
+    params.push_back(
+        ShuffleTestParams{ShuffleWriterType::kSortShuffleV2, PartitionWriterType::kRss, compression, 0, 0});
     for (const auto compressionThreshold : compressionThresholds) {
       for (const auto mergeBufferSize : mergeBufferSizes) {
         params.push_back(ShuffleTestParams{
@@ -95,8 +96,7 @@ static const auto kShuffleWriteTestParams = createShuffleTestParams();
 } // namespace
 
 TEST_P(SinglePartitioningShuffleWriter, single) {
-  if (GetParam().shuffleWriterType != ShuffleWriterType::kHashShuffle &&
-      GetParam().partitionWriterType == PartitionWriterType::kLocal) {
+  if (GetParam().shuffleWriterType != ShuffleWriterType::kHashShuffle) {
     return;
   }
   // Split 1 RowVector.

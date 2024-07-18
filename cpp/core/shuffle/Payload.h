@@ -57,7 +57,7 @@ class Payload {
   }
 
   uint32_t numBuffers() {
-    return isValidityBuffer_->size();
+    return isValidityBuffer_ ? isValidityBuffer_->size() : 1;
   }
 
   const std::vector<bool>* isValidityBuffer() const {

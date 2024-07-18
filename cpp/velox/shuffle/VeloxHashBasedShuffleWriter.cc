@@ -771,6 +771,10 @@ arrow::Status VeloxHashBasedShuffleWriter::initColumnTypes(const facebook::velox
     }
   }
 
+  if (hasComplexType_) {
+    isValidityBuffer_.push_back(false);
+  }
+
   fixedWidthColumnCount_ = simpleColumnIndices_.size();
 
   simpleColumnIndices_.insert(simpleColumnIndices_.end(), binaryColumnIndices_.begin(), binaryColumnIndices_.end());
@@ -949,7 +953,7 @@ arrow::Status VeloxHashBasedShuffleWriter::evictBuffers(
   if (!buffers.empty()) {
     auto payload = std::make_unique<InMemoryPayload>(numRows, &isValidityBuffer_, std::move(buffers));
     RETURN_NOT_OK(
-        partitionWriter_->evict(partitionId, std::move(payload), Evict::kCache, reuseBuffers, hasComplexType_));
+        partitionWriter_->evict(partitionId, std::move(payload), Evict::kCache, reuseBuffers, hasComplexType_, false));
   }
   return arrow::Status::OK();
 }
@@ -1360,7 +1364,7 @@ arrow::Result<int64_t> VeloxHashBasedShuffleWriter::evictPartitionBuffersMinSize
       auto pid = item.first;
       ARROW_ASSIGN_OR_RAISE(auto buffers, assembleBuffers(pid, false));
       auto payload = std::make_unique<InMemoryPayload>(item.second, &isValidityBuffer_, std::move(buffers));
-      RETURN_NOT_OK(partitionWriter_->evict(pid, std::move(payload), Evict::kSpill, false, hasComplexType_));
+      RETURN_NOT_OK(partitionWriter_->evict(pid, std::move(payload), Evict::kSpill, false, hasComplexType_, false));
       evicted = beforeEvict - partitionBufferPool_->bytes_allocated();
       if (evicted >= size) {
         break;
