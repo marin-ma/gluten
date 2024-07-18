@@ -409,7 +409,7 @@ std::unique_ptr<ColumnarBatchIterator> VeloxColumnarBatchDeserializerFactory::cr
         veloxPool_, rowType_, batchSize_, veloxCompressionType_, deserializeTime_, std::move(in));
   }
   return std::make_unique<VeloxRowVectorDeserializer>(
-      std::move(in), schema_, codec_, rowType_, batchSize_, memoryPool_, veloxPool_, deserializeTime_);
+      std::move(in), schema_, codec_, rowType_, batchSize_, memoryPool_, veloxPool_, deserializeTime_, decompressTime_);
 }
 
 VeloxShuffleReaderOutStreamWrapper::VeloxShuffleReaderOutStreamWrapper(
@@ -533,7 +533,8 @@ VeloxRowVectorDeserializer::VeloxRowVectorDeserializer(
     int32_t batchSize,
     arrow::MemoryPool* memoryPool,
     std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool,
-    int64_t& deserializeTime)
+    int64_t& deserializeTime,
+    int64_t& decompressTime)
     : in_(std::move(in)),
       schema_(schema),
       codec_(codec),
@@ -541,7 +542,8 @@ VeloxRowVectorDeserializer::VeloxRowVectorDeserializer(
       batchSize_(batchSize),
       arrowPool_(memoryPool),
       veloxPool_(veloxPool),
-      deserializeTime_(deserializeTime) {}
+      deserializeTime_(deserializeTime),
+      decompressTime_(decompressTime) {}
 
 std::shared_ptr<ColumnarBatch> VeloxRowVectorDeserializer::next() {
   if (reachEos_) {
@@ -556,51 +558,20 @@ std::shared_ptr<ColumnarBatch> VeloxRowVectorDeserializer::next() {
   }
 
   while (cachedRows_ < batchSize_) {
-    if (codec_) {
-      int64_t compressedLength;
-      GLUTEN_ASSIGN_OR_THROW(auto bytes, in_->Read(sizeof(compressedLength), &compressedLength));
-      if (bytes == 0) {
-        reachEos_ = true;
-        if (cachedRows_ > 0) {
-          return deserializeToBatch();
-        }
-        return nullptr;
-      }
-      int64_t uncompressedLength;
-      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(sizeof(uncompressedLength), &uncompressedLength));
-      GLUTEN_ASSIGN_OR_THROW(auto compressed, arrow::AllocateResizableBuffer(compressedLength, arrowPool_));
-      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(compressedLength, compressed->mutable_data()));
-      VELOX_CHECK_EQ(bytes, compressedLength);
+    uint32_t numRows;
+    GLUTEN_ASSIGN_OR_THROW(
+        auto arrowBuffers, BlockPayload::deserialize(in_.get(), schema_, codec_, arrowPool_, numRows, decompressTime_));
 
-      std::shared_ptr<arrow::ResizableBuffer> uncompressed;
-      GLUTEN_ASSIGN_OR_THROW(uncompressed, arrow::AllocateResizableBuffer(uncompressedLength, arrowPool_));
-      GLUTEN_ASSIGN_OR_THROW(
-          bytes,
-          codec_->Decompress(compressedLength, compressed->data(), uncompressedLength, uncompressed->mutable_data()));
-
-      auto data = uncompressed->mutable_data();
-      auto numRows = *(uint32_t*)data;
-      auto bufferSize = *(uint64_t*)(data + sizeof(numRows));
-      auto buffer = arrow::SliceBuffer(uncompressed, sizeof(numRows) + sizeof(bufferSize), bufferSize);
-      cachedInputs_.emplace_back(numRows, wrapInBufferViewAsOwner(buffer->data(), buffer->size(), buffer));
-      cachedRows_ += numRows;
-    } else {
-      uint32_t numRows;
-      GLUTEN_ASSIGN_OR_THROW(auto bytes, in_->Read(sizeof(numRows), &numRows));
-      if (bytes == 0) {
-        reachEos_ = true;
-        if (cachedRows_ > 0) {
-          return deserializeToBatch();
-        }
-        return nullptr;
+    if (numRows == 0) {
+      reachEos_ = true;
+      if (cachedRows_ > 0) {
+        return deserializeToBatch();
       }
-      uint64_t bufferSize;
-      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(sizeof(bufferSize), &bufferSize));
-      auto buffer = facebook::velox::AlignedBuffer::allocate<char>(bufferSize, veloxPool_.get());
-      GLUTEN_ASSIGN_OR_THROW(bytes, in_->Read(bufferSize, buffer->asMutable<void>()));
-      cachedInputs_.emplace_back(numRows, std::move(buffer));
-      cachedRows_ += numRows;
+      return nullptr;
     }
+    auto buffer = std::move(arrowBuffers[0]);
+    cachedInputs_.emplace_back(numRows, wrapInBufferViewAsOwner(buffer->data(), buffer->size(), buffer));
+    cachedRows_ += numRows;
   }
   return deserializeToBatch();
 }

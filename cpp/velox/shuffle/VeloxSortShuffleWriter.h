@@ -60,19 +60,23 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   arrow::Status insert(const facebook::velox::RowVectorPtr& vector, int64_t memLimit);
 
+  void insertRows(facebook::velox::row::CompactRow& row, uint32_t offset, uint32_t rows);
+
+  arrow::Status maybeSpill(int32_t nextRows);
+
   arrow::Status evictAllPartitions();
 
   arrow::Status evictPartition(uint32_t partitionId, size_t begin, size_t end);
 
-  arrow::Status spillIfNeeded(int32_t nextRows);
+  uint32_t maxRowsToInsert(uint32_t offset, uint32_t rows);
 
   void acquireNewBuffer(int64_t memLimit, uint64_t minSizeRequired);
 
-  uint32_t maxRowsToInsert(uint32_t offset, uint32_t rows);
-
-  void insertRows(facebook::velox::row::CompactRow& row, uint32_t offset, uint32_t rows);
-
   void growArrayIfNecessary(uint32_t rows);
+
+  int64_t c2rTime() const;
+
+  int64_t sortTime() const;
 
   using RowSizeType = uint32_t;
   using ElementType = std::pair<uint64_t, RowSizeType>;
@@ -114,7 +118,7 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
   std::optional<int32_t> fixedRowSize_;
   std::vector<uint64_t> rowSizes_;
 
-  int64_t convertTime_{0};
+  int64_t c2rTime_{0};
   int64_t sortTime_{0};
   bool stopped_{false};
 };

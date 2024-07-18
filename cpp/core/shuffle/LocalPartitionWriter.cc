@@ -40,12 +40,13 @@ class LocalPartitionWriter::LocalSpiller {
   arrow::Status spill(uint32_t partitionId, std::unique_ptr<BlockPayload> payload) {
     // Check spill Type.
     ARROW_RETURN_IF(
-        payload->type() != Payload::kUncompressed && payload->type() != Payload::kRaw,
+        payload->type() == Payload::kToBeCompressed,
         arrow::Status::Invalid("Cannot spill payload of type: " + payload->toString()));
 
     if (!opened_) {
       opened_ = true;
-      ARROW_ASSIGN_OR_RAISE(os_, arrow::io::FileOutputStream::Open(spillFile_, true));
+      ARROW_ASSIGN_OR_RAISE(auto raw, arrow::io::FileOutputStream::Open(spillFile_, true));
+      ARROW_ASSIGN_OR_RAISE(os_, arrow::io::BufferedOutputStream::Create(16384, pool_, raw));
       std::cout << "open spill file: " << spillFile_ << std::endl;
       diskSpill_ = std::make_unique<Spill>(Spill::SpillType::kSequentialSpill);
     }
@@ -62,8 +63,10 @@ class LocalPartitionWriter::LocalSpiller {
       return arrow::Status::OK();
     }
 
-    auto payloadType = codec_ != nullptr && payload->numRows() >= compressionThreshold_ ? Payload::kToBeCompressed
-                                                                                        : Payload::kUncompressed;
+    auto payloadType = payload->type();
+    if (payloadType == Payload::kUncompressed && codec_ != nullptr && payload->numRows() >= compressionThreshold_) {
+      payloadType = Payload::kToBeCompressed;
+    }
     diskSpill_->insertPayload(
         partitionId, payloadType, payload->numRows(), payload->isValidityBuffer(), end - start, pool_, codec_);
     return arrow::Status::OK();
@@ -100,7 +103,7 @@ class LocalPartitionWriter::LocalSpiller {
   bool opened_{false};
   bool finished_{false};
   std::shared_ptr<Spill> diskSpill_{nullptr};
-  std::shared_ptr<arrow::io::FileOutputStream> os_;
+  std::shared_ptr<arrow::io::OutputStream> os_;
   int64_t spillTime_{0};
 };
 
@@ -504,10 +507,10 @@ arrow::Status LocalPartitionWriter::stop(ShuffleWriterMetrics* metrics) {
   return arrow::Status::OK();
 }
 
-arrow::Status LocalPartitionWriter::requestSpill(bool stop) {
+arrow::Status LocalPartitionWriter::requestSpill(bool isFinal) {
   if (!spiller_ || spiller_->finished()) {
     std::string spillFile;
-    if (stop && useSpillFileAsDataFile()) {
+    if (isFinal && useSpillFileAsDataFile()) {
       spillFile = dataFile_;
     } else {
       ARROW_ASSIGN_OR_RAISE(spillFile, createTempShuffleFile(nextSpilledFileDir()));
@@ -534,8 +537,25 @@ arrow::Status LocalPartitionWriter::evict(
     std::unique_ptr<InMemoryPayload> inMemoryPayload,
     Evict::type evictType,
     bool reuseBuffers,
-    bool hasComplexType) {
+    bool hasComplexType,
+    bool isFinal) {
   rawPartitionLengths_[partitionId] += inMemoryPayload->getBufferSize();
+
+  if (evictType == Evict::kSortSpill) {
+    if (partitionId < lastEvictPid_) {
+      RETURN_NOT_OK(finishSpill());
+    }
+    lastEvictPid_ = partitionId;
+
+    RETURN_NOT_OK(requestSpill(isFinal));
+
+    auto payloadType = codec_ ? Payload::Type::kCompressed : Payload::Type::kUncompressed;
+    ARROW_ASSIGN_OR_RAISE(
+        auto payload,
+        inMemoryPayload->toBlockPayload(payloadType, payloadPool_.get(), codec_ ? codec_.get() : nullptr));
+    RETURN_NOT_OK(spiller_->spill(partitionId, std::move(payload)));
+    return arrow::Status::OK();
+  }
 
   if (evictType == Evict::kSpill) {
     RETURN_NOT_OK(requestSpill(false));

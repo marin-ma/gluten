@@ -54,11 +54,10 @@ arrow::Status RssPartitionWriter::evict(
     std::unique_ptr<InMemoryPayload> inMemoryPayload,
     Evict::type evictType,
     bool reuseBuffers,
-    bool hasComplexType) {
+    bool hasComplexType,
+    bool isFinal) {
   rawPartitionLengths_[partitionId] += inMemoryPayload->getBufferSize();
-  auto payloadType = (codec_ && inMemoryPayload->numRows() >= options_.compressionThreshold)
-      ? Payload::Type::kCompressed
-      : Payload::Type::kUncompressed;
+  auto payloadType = codec_ ? Payload::Type::kCompressed : Payload::Type::kUncompressed;
   ARROW_ASSIGN_OR_RAISE(
       auto payload, inMemoryPayload->toBlockPayload(payloadType, payloadPool_.get(), codec_ ? codec_.get() : nullptr));
   // Copy payload to arrow buffered os.
