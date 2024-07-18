@@ -18,6 +18,8 @@
 #pragma once
 
 #include <arrow/status.h>
+#include "velox/common/memory/HashStringAllocator.h"
+
 #include <map>
 #include <vector>
 
@@ -62,7 +64,7 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   arrow::Status evictPartition(uint32_t partitionId, size_t begin, size_t end);
 
-  arrow::Status spillIfNeeded(int64_t memLimit, int32_t nextRows);
+  arrow::Status spillIfNeeded(int32_t nextRows);
 
   void acquireNewBuffer(int64_t memLimit, uint64_t minSizeRequired);
 
@@ -70,23 +72,31 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   void insertRows(facebook::velox::row::CompactRow& row, uint32_t offset, uint32_t rows);
 
-  using RowSize = uint32_t;
+  void growArrayIfNecessary(uint32_t rows);
 
-  std::unique_ptr<arrow::util::Codec> codec_;
+  using RowSizeType = uint32_t;
+  using ElementType = std::pair<uint64_t, RowSizeType>;
+  using Allocator = facebook::velox::StlAllocator<ElementType>;
+  using SortArray = std::vector<ElementType, Allocator>;
 
-  uint32_t numInputs_{0};
-  uint32_t pageCursor_{0};
-  uint32_t totalRows_{0};
+  std::unique_ptr<facebook::velox::HashStringAllocator> allocator_;
+  // Stores compact row id -> row
+  SortArray array_;
+  uint32_t offset_{0};
 
   std::vector<facebook::velox::BufferPtr> pages_;
   std::vector<char*> pageAddresses_;
   char* currentPage_;
   uint32_t pageNumber_;
+  uint32_t pageCursor_;
 
-  // Stores compact row id -> row
-  std::vector<std::pair<uint64_t, RowSize>> data_;
+  // FIXME: Use configuration to replace hardcode.
+  uint32_t initialSize_ = 4096;
+  bool useRadixSort_ = false;
 
   facebook::velox::BufferPtr sortedBuffer_;
+
+  std::unique_ptr<arrow::util::Codec> codec_;
 
   // Row ID -> Partition ID
   // subscript: The index of row in the current input RowVector
@@ -105,6 +115,7 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
   std::vector<uint64_t> rowSizes_;
 
   int64_t convertTime_{0};
+  int64_t sortTime_{0};
   bool stopped_{false};
 };
 } // namespace gluten
