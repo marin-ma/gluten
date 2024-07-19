@@ -53,7 +53,7 @@ class LocalPartitionWriter::LocalSpiller {
 
     ARROW_ASSIGN_OR_RAISE(auto start, os_->Tell());
     RETURN_NOT_OK(payload->serialize(os_.get()));
-    // Because payload is uncompressed or raw, no compress time.
+    compressTime_ += payload->getCompressTime();
     spillTime_ += payload->getWriteTime();
     ARROW_ASSIGN_OR_RAISE(auto end, os_->Tell());
     DLOG(INFO) << "LocalSpiller: Spilled partition " << partitionId << " file start: " << start << ", file end: " << end
@@ -90,8 +90,12 @@ class LocalPartitionWriter::LocalSpiller {
     return finished_;
   }
 
-  int64_t getSpillTime() {
+  int64_t getSpillTime() const {
     return spillTime_;
+  }
+
+  int64_t getCompressTime() const {
+    return compressTime_;
   }
 
  private:
@@ -105,6 +109,7 @@ class LocalPartitionWriter::LocalSpiller {
   std::shared_ptr<Spill> diskSpill_{nullptr};
   std::shared_ptr<arrow::io::OutputStream> os_;
   int64_t spillTime_{0};
+  int64_t compressTime_{0};
 };
 
 class LocalPartitionWriter::PayloadMerger {
@@ -348,15 +353,15 @@ class LocalPartitionWriter::PayloadCache {
     return diskSpill;
   }
 
-  int64_t getCompressTime() {
+  int64_t getCompressTime() const {
     return compressTime_;
   }
 
-  int64_t getSpillTime() {
+  int64_t getSpillTime() const {
     return spillTime_;
   }
 
-  int64_t getWriteTime() {
+  int64_t getWriteTime() const {
     return writeTime_;
   }
 
@@ -492,7 +497,6 @@ arrow::Status LocalPartitionWriter::stop(ShuffleWriterMetrics* metrics) {
       uint64_t length = 0;
       while (auto payload = spill->nextPayload(pid)) {
         length += payload->rawSize();
-        compressTime_ += payload->getCompressTime();
       }
       partitionLengths_[pid] = length;
     }
@@ -528,6 +532,7 @@ arrow::Status LocalPartitionWriter::finishSpill() {
     spills_.emplace_back();
     ARROW_ASSIGN_OR_RAISE(spills_.back(), spiller->finish());
     spillTime_ += spiller->getSpillTime();
+    compressTime_ += spiller->getCompressTime();
   }
   return arrow::Status::OK();
 }

@@ -162,7 +162,7 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
   jniByteInputStreamClose = getMethodIdOrError(env, jniByteInputStreamClass, "close", "()V");
 
   splitResultClass = createGlobalClassReferenceOrError(env, "Lorg/apache/gluten/vectorized/GlutenSplitResult;");
-  splitResultConstructor = getMethodIdOrError(env, splitResultClass, "<init>", "(JJJJJJJ[J[J)V");
+  splitResultConstructor = getMethodIdOrError(env, splitResultClass, "<init>", "(JJJJJJJJJ[J[J)V");
 
   columnarBatchSerializeResultClass =
       createGlobalClassReferenceOrError(env, "Lorg/apache/gluten/vectorized/ColumnarBatchSerializeResult;");
@@ -982,6 +982,8 @@ JNIEXPORT jobject JNICALL Java_org_apache_gluten_vectorized_ShuffleWriterJniWrap
       shuffleWriter->totalWriteTime(),
       shuffleWriter->totalEvictTime(),
       shuffleWriter->totalCompressTime(),
+      shuffleWriter->totalSortTime(),
+      shuffleWriter->totalC2RTime(),
       shuffleWriter->totalBytesWritten(),
       shuffleWriter->totalBytesEvicted(),
       shuffleWriter->maxPartitionBufferSize(),

@@ -77,6 +77,14 @@ class ShuffleWriter : public Reclaimable {
     return metrics_.totalCompressTime;
   }
 
+  virtual int64_t totalSortTime() const {
+    return 0;
+  }
+
+  virtual int64_t totalC2RTime() const {
+    return 0;
+  }
+
   const std::vector<int64_t>& partitionLengths() const {
     return metrics_.partitionLengths;
   }

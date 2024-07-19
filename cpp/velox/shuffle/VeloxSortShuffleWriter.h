@@ -44,6 +44,10 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
 
   arrow::Status reclaimFixedSize(int64_t size, int64_t* actual) override;
 
+  int64_t totalSortTime() const override;
+
+  int64_t totalC2RTime() const override;
+
  private:
   VeloxSortShuffleWriter(
       uint32_t numPartitions,
@@ -52,7 +56,7 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
       std::shared_ptr<facebook::velox::memory::MemoryPool> veloxPool,
       arrow::MemoryPool* pool);
 
-  void init();
+  arrow::Status init();
 
   void initRowType(const facebook::velox::RowVectorPtr& rv);
 
@@ -73,10 +77,6 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
   void acquireNewBuffer(int64_t memLimit, uint64_t minSizeRequired);
 
   void growArrayIfNecessary(uint32_t rows);
-
-  int64_t c2rTime() const;
-
-  int64_t sortTime() const;
 
   using RowSizeType = uint32_t;
   using ElementType = std::pair<uint64_t, RowSizeType>;
@@ -99,8 +99,6 @@ class VeloxSortShuffleWriter final : public VeloxShuffleWriter {
   bool useRadixSort_ = false;
 
   facebook::velox::BufferPtr sortedBuffer_;
-
-  std::unique_ptr<arrow::util::Codec> codec_;
 
   // Row ID -> Partition ID
   // subscript: The index of row in the current input RowVector
