@@ -68,11 +68,12 @@ class VeloxCelebornHashBasedColumnarShuffleWriter[K, V](
     }
   }
 
-  private val memoryLimit: Long = if ("sort".equals(shuffleWriterType)) {
-    Math.min(clientSortMemoryMaxSize, clientPushBufferMaxSize * numPartitions)
-  } else {
-    availableOffHeapPerTask()
-  }
+  private val memoryLimit: Long =
+    if (GlutenConfig.GLUTEN_HASH_SHUFFLE_WRITER.equals(shuffleWriterType)) {
+      availableOffHeapPerTask()
+    } else {
+      Math.min(clientSortMemoryMaxSize, clientPushBufferMaxSize * numPartitions)
+    }
 
   private def availableOffHeapPerTask(): Long = {
     val perTask =

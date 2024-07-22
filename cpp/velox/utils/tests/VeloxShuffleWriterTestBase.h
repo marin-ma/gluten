@@ -528,7 +528,7 @@ class VeloxShuffleWriterMemoryTest : public VeloxShuffleWriterTestBase, public t
         PartitionWriterType::kLocal, numPartitions, dataFile_, localDirs_, partitionWriterOptions_, arrowPool);
     GLUTEN_ASSIGN_OR_THROW(
         auto shuffleWriter,
-        VeloxHashBasedShuffleWriter::create(
+        VeloxHashShuffleWriter::create(
             numPartitions, std::move(partitionWriter), std::move(shuffleWriterOptions_), pool_, arrowPool));
     return shuffleWriter;
   }
