@@ -979,7 +979,7 @@ JNIEXPORT jobject JNICALL Java_org_apache_gluten_vectorized_ShuffleWriterJniWrap
       shuffleWriter->totalC2RTime(),
       shuffleWriter->totalBytesWritten(),
       shuffleWriter->totalBytesEvicted(),
-      shuffleWriter->maxPartitionBufferSize(),
+      shuffleWriter->peakBytesAllocated(),
       partitionLengthArr,
       rawPartitionLengthArr);
 
