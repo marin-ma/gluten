@@ -150,9 +150,9 @@ class VeloxCelebornHashBasedColumnarShuffleWriter[K, V](
 
     dep.metrics("shuffleWallTime").add(System.nanoTime() - startTime)
     val nativeMetrics = if (isSort) {
-      dep.metrics("splitTime")
-    } else {
       dep.metrics("sortTime")
+    } else {
+      dep.metrics("splitTime")
     }
     nativeMetrics
       .add(
