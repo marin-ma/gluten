@@ -37,21 +37,33 @@ class UdfLoader {
     std::string intermediateType{};
 
     bool variableArity;
+    bool enableTypeConversion;
 
-    UdfSignature(std::string name, std::string returnType, std::string argTypes, bool variableArity)
-        : name(name), returnType(returnType), argTypes(argTypes), variableArity(variableArity) {}
+    UdfSignature(
+        std::string name,
+        std::string returnType,
+        std::string argTypes,
+        bool variableArity,
+        bool enableTypeConversion)
+        : name(name),
+          returnType(returnType),
+          argTypes(argTypes),
+          variableArity(variableArity),
+          enableTypeConversion(enableTypeConversion) {}
 
     UdfSignature(
         std::string name,
         std::string returnType,
         std::string argTypes,
         std::string intermediateType,
-        bool variableArity)
+        bool variableArity,
+        bool enableTypeConversion)
         : name(name),
           returnType(returnType),
           argTypes(argTypes),
           intermediateType(intermediateType),
-          variableArity(variableArity) {}
+          variableArity(variableArity),
+          enableTypeConversion(enableTypeConversion) {}
 
     ~UdfSignature() = default;
   };

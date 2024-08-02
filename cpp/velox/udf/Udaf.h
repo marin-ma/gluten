@@ -28,6 +28,7 @@ struct UdafEntry {
 
   const char* intermediateType{nullptr};
   bool variableArity{false};
+  bool enableTypeConversion{false};
 };
 
 #define GLUTEN_GET_NUM_UDAF getNumUdaf
