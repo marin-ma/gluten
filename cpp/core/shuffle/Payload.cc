@@ -19,6 +19,8 @@
 #include <arrow/buffer.h>
 #include <arrow/io/memory.h>
 #include <arrow/util/bitmap.h>
+#include <glog/logging.h>
+
 #include <iostream>
 #include <numeric>
 
@@ -150,10 +152,12 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> readCompressedBuffer(
   int64_t uncompressedLength;
   RETURN_NOT_OK(inputStream->Read(sizeof(int64_t), &uncompressedLength));
   if (compressedLength == kUncompressedBuffer) {
+    LOG(WARNING) << "Read uncompressed buffer size: " << uncompressedLength;
     ARROW_ASSIGN_OR_RAISE(auto uncompressed, arrow::AllocateResizableBuffer(uncompressedLength, pool));
     RETURN_NOT_OK(inputStream->Read(uncompressedLength, uncompressed->mutable_data()));
     return uncompressed;
   }
+  LOG(WARNING) << "Read compressed buffer size: " << compressedLength << ", uncompressed size: " << uncompressedLength;
   ARROW_ASSIGN_OR_RAISE(auto compressed, arrow::AllocateResizableBuffer(compressedLength, pool));
   RETURN_NOT_OK(inputStream->Read(compressedLength, compressed->mutable_data()));
 

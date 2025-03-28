@@ -394,12 +394,15 @@ VeloxSortShuffleReaderDeserializer::VeloxSortShuffleReaderDeserializer(
 std::shared_ptr<ColumnarBatch> VeloxSortShuffleReaderDeserializer::next() {
   if (reachedEos_) {
     if (cachedRows_ > 0) {
+      LOG(WARNING) << "Converting to RowVector due to reach EOS. Remaining rows: " << cachedRows_;
       return deserializeToBatch();
     }
     return nullptr;
   }
 
   if (cachedRows_ >= batchSize_) {
+    LOG(WARNING) << "Converting to RowVector due to reach batchSize: " << batchSize_
+                 << ", Remaining rows: " << cachedRows_;
     return deserializeToBatch();
   }
 
@@ -412,6 +415,7 @@ std::shared_ptr<ColumnarBatch> VeloxSortShuffleReaderDeserializer::next() {
     if (arrowBuffers.empty()) {
       reachedEos_ = true;
       if (cachedRows_ > 0) {
+        LOG(WARNING) << "Converting to RowVector due to reach EOS. Remaining rows: " << cachedRows_;
         return deserializeToBatch();
       }
       return nullptr;
@@ -426,6 +430,8 @@ std::shared_ptr<ColumnarBatch> VeloxSortShuffleReaderDeserializer::next() {
       readLargeRow(arrowBuffers);
     }
   }
+  LOG(WARNING) << "Converting to RowVector due to reach batchSize: " << batchSize_
+               << ", Remaining rows: " << cachedRows_;
   return deserializeToBatch();
 }
 
@@ -472,6 +478,7 @@ void VeloxSortShuffleReaderDeserializer::readLargeRow(std::vector<std::shared_pt
   // Read and cache the remaining segments.
   uint32_t numRows;
   while (bufferSize < rowSize) {
+    LOG(WARNING) << "readLargeRow called. row size total: " << rowSize << ", row size read: " << bufferSize;
     GLUTEN_ASSIGN_OR_THROW(
         arrowBuffers,
         BlockPayload::deserialize(in_.get(), codec_, arrowPool_, numRows, deserializeTime_, decompressTime_));
@@ -479,6 +486,7 @@ void VeloxSortShuffleReaderDeserializer::readLargeRow(std::vector<std::shared_pt
     bufferSize += arrowBuffers[0]->size();
     buffers.emplace_back(std::move(arrowBuffers[0]));
   }
+  LOG(WARNING) << "readLargeRow called. row size total: " << rowSize << ", row size read: " << bufferSize;
   VELOX_CHECK_EQ(bufferSize, rowSize);
   // Merge all segments.
   GLUTEN_ASSIGN_OR_THROW(std::shared_ptr<arrow::Buffer> rowBuffer, arrow::AllocateBuffer(rowSize, arrowPool_));
