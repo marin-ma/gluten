@@ -121,23 +121,11 @@ class GlutenConfig(conf: SQLConf) extends GlutenCoreConfig(conf) {
       .getConfString("spark.shuffle.manager", "sort")
       .equals("org.apache.spark.shuffle.GlutenShuffleManager")
 
-  // Whether to use ColumnarShuffleManager.
-  def isUseColumnarShuffleManager: Boolean =
-    conf
-      .getConfString("spark.shuffle.manager", "sort")
-      .equals("org.apache.spark.shuffle.sort.ColumnarShuffleManager")
-
   // Whether to use CelebornShuffleManager.
   def isUseCelebornShuffleManager: Boolean =
     conf
       .getConfString("spark.shuffle.manager", "sort")
       .contains("celeborn")
-
-  // Whether to use UniffleShuffleManager.
-  def isUseUniffleShuffleManager: Boolean =
-    conf
-      .getConfString("spark.shuffle.manager", "sort")
-      .contains("UniffleShuffleManager")
 
   // scalastyle:off classforname
   def shuffleManagerSupportsColumnarShuffle: Boolean = {

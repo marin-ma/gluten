@@ -130,6 +130,19 @@ class CHConfig(conf: SQLConf) extends GlutenConfig(conf) {
     getConf(ENABLE_CH_REWRITE_DATE_CONVERSION)
 
   def enableGlutenLocalFileCache: Boolean = getConf(ENABLE_GLUTEN_LOCAL_FILE_CACHE)
+
+  // Whether to use ColumnarShuffleManager.
+  def isUseColumnarShuffleManager: Boolean =
+    conf
+      .getConfString("spark.shuffle.manager", "sort")
+      .equals("org.apache.spark.shuffle.sort.ColumnarShuffleManager")
+
+  // Whether to use UniffleShuffleManager.
+  def isUseUniffleShuffleManager: Boolean =
+    conf
+      .getConfString("spark.shuffle.manager", "sort")
+      .contains("UniffleShuffleManager")
+
 }
 
 object GlutenObjectStorageConfig {

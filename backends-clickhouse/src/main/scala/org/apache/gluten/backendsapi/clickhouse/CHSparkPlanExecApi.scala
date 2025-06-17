@@ -17,6 +17,7 @@
 package org.apache.gluten.backendsapi.clickhouse
 
 import org.apache.gluten.backendsapi.{BackendsApiManager, SparkPlanExecApi}
+import org.apache.gluten.backendsapi.clickhouse.CHConfig
 import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.exception.{GlutenException, GlutenNotSupportException}
 import org.apache.gluten.execution._
@@ -461,7 +462,7 @@ class CHSparkPlanExecApi extends SparkPlanExecApi with Logging {
       val constructor =
         clazz.getConstructor(classOf[SQLMetric], classOf[SQLMetric], classOf[SQLMetric])
       constructor.newInstance(readBatchNumRows, numOutputRows, dataSize).asInstanceOf[Serializer]
-    } else if (GlutenConfig.get.isUseUniffleShuffleManager) {
+    } else if (CHConfig.get.isUseUniffleShuffleManager) {
       throw new UnsupportedOperationException("temporarily uniffle not support ch ")
     } else {
       new CHColumnarBatchSerializer(readBatchNumRows, numOutputRows, dataSize, deserializationTime)

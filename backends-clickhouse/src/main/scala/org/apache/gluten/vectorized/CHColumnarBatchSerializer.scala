@@ -17,6 +17,7 @@
 package org.apache.gluten.vectorized
 
 import org.apache.gluten.backendsapi.clickhouse.CHBackendSettings
+import org.apache.gluten.backendsapi.clickhouse.CHConfig
 import org.apache.gluten.config.GlutenConfig
 
 import org.apache.spark.SparkEnv
@@ -66,7 +67,7 @@ private class CHColumnarBatchSerializerInstance(
   private lazy val compressionLevel =
     GlutenShuffleUtils.getCompressionLevel(conf, compressionCodec)
 
-  private val useColumnarShuffle: Boolean = GlutenConfig.get.isUseColumnarShuffleManager
+  private val useColumnarShuffle: Boolean = CHConfig.get.isUseColumnarShuffleManager
 
   override def deserializeStream(in: InputStream): DeserializationStream = {
     // Don't use GlutenConfig in this method. It will execute in non task Thread.
