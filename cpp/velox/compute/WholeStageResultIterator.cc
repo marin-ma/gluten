@@ -21,6 +21,9 @@
 #include "velox/connectors/hive/HiveConfig.h"
 #include "velox/connectors/hive/HiveConnectorSplit.h"
 #include "velox/exec/PlanNodeStats.h"
+
+#include "folly/dynamic.h"
+
 #ifdef GLUTEN_ENABLE_GPU
 #include <cudf/io/types.hpp>
 #include "velox/experimental/cudf/CudfConfig.h"
@@ -60,6 +63,27 @@ const std::string kWriteIOTime = "writeIOWallNanos";
 
 // others
 const std::string kHiveDefaultPartition = "__HIVE_DEFAULT_PARTITION__";
+
+folly::dynamic timeDetailsToDynamic(const facebook::velox::TimeDetails& t) {
+  auto us = std::chrono::duration_cast<std::chrono::microseconds>(t.startTime.time_since_epoch()).count();
+
+  folly::dynamic obj = folly::dynamic::object;
+  obj["startTimeUs"] = us;
+  obj["durationUs"] = t.durationUs;
+  return obj;
+}
+
+void addTimeDetails(
+    const std::unordered_map<std::string, std::vector<TimeDetails>>& timeDetails,
+    folly::dynamic& jsonMap) {
+  for (const auto& [key, vec] : timeDetails) {
+    folly::dynamic jsonArray = folly::dynamic::array;
+    for (const auto& t : vec) {
+      jsonArray.push_back(timeDetailsToDynamic(t));
+    }
+    jsonMap[key] = jsonArray;
+  }
+}
 
 } // namespace
 
@@ -410,6 +434,7 @@ void WholeStageResultIterator::collectMetrics() {
   }
 
   metrics_ = std::make_unique<Metrics>(statsNum);
+  folly::dynamic timeDetailsJson = folly::dynamic::object;
 
   int metricIndex = 0;
   for (int idx = 0; idx < orderedNodeIds_.size(); idx++) {
@@ -488,6 +513,7 @@ void WholeStageResultIterator::collectMetrics() {
 
       metricIndex += 1;
     }
+    addTimeDetails(stats.timeDetails, timeDetailsJson);
   }
 
   // Put the loadLazyVector time into the metrics of the last operator.
@@ -501,6 +527,10 @@ void WholeStageResultIterator::collectMetrics() {
           collectTaskStatsThreshold * 1'000) {
     auto jsonStats = velox::exec::toPlanStatsJson(taskStats);
     metrics_->stats = folly::toJson(jsonStats);
+  }
+
+  if (!timeDetailsJson.empty()) {
+    metrics_->timeDetails = folly::toJson(timeDetailsJson);
   }
 }
 

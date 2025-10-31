@@ -66,8 +66,10 @@ object MetricsUtil extends Logging {
       }
     }
 
-    val accumulator = new TaskStatsAccumulator()
-    child.session.sparkContext.register(accumulator, "velox task stats")
+    val veloxTaskStatsAccumulator = new TaskStatsAccumulator()
+    val timeDetailsAccumulator = new TaskStatsAccumulator()
+    child.session.sparkContext.register(veloxTaskStatsAccumulator, "velox task stats")
+    child.session.sparkContext.register(timeDetailsAccumulator, "time details")
 
     val mut: MetricsUpdaterTree = treeifyMetricsUpdaters(child)
 
@@ -77,7 +79,8 @@ object MetricsUtil extends Logging {
       JLong.valueOf(relMap.size() - 1),
       joinParamsMap,
       aggParamsMap,
-      accumulator)
+      veloxTaskStatsAccumulator,
+      timeDetailsAccumulator)
   }
 
   /**
@@ -334,7 +337,8 @@ object MetricsUtil extends Logging {
       operatorIdx: JLong,
       joinParamsMap: JMap[JLong, JoinParams],
       aggParamsMap: JMap[JLong, AggregationParams],
-      taskStatsAccumulator: TaskStatsAccumulator): IMetrics => Unit = {
+      taskStatsAccumulator: TaskStatsAccumulator,
+      timeDetailsAccumulator: TaskStatsAccumulator): IMetrics => Unit = {
     imetrics =>
       try {
         val metrics = imetrics.asInstanceOf[Metrics]
@@ -354,6 +358,10 @@ object MetricsUtil extends Logging {
           // Update the task stats accumulator with the metrics.
           if (metrics.taskStats != null) {
             taskStatsAccumulator.add(metrics.taskStats)
+          }
+
+          if (metrics.timeDetails != null) {
+            timeDetailsAccumulator.add(metrics.timeDetails)
           }
         }
       } catch {

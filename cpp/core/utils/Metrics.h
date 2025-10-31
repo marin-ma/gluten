@@ -34,6 +34,8 @@ struct Metrics {
   // Optional stats string.
   std::optional<std::string> stats = std::nullopt;
 
+  std::optional<std::string> timeDetails = std::nullopt;
+
   enum TYPE {
     // Begin from 0.
     kBegin = 0,

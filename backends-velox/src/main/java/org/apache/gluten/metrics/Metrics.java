@@ -66,6 +66,8 @@ public class Metrics implements IMetrics {
 
   public String taskStats;
 
+  public String timeDetails;
+
   /** Create an instance for native metrics. */
   public Metrics(
       long[] inputRows,
@@ -109,7 +111,8 @@ public class Metrics implements IMetrics {
       long[] writeIOTime,
       long[] numWrittenFiles,
       long[] loadLazyVectorTime,
-      String taskStats) {
+      String taskStats,
+      String timeDetails) {
     this.inputRows = inputRows;
     this.inputVectors = inputVectors;
     this.inputBytes = inputBytes;
@@ -153,6 +156,7 @@ public class Metrics implements IMetrics {
     this.numWrittenFiles = numWrittenFiles;
     this.loadLazyVectorTime = loadLazyVectorTime;
     this.taskStats = taskStats;
+    this.timeDetails = timeDetails;
   }
 
   public OperatorMetrics getOperatorMetrics(int index) {
