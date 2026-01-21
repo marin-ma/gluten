@@ -1,11 +1,12 @@
 /*
- * Copyright (2021) The Delta Lake Project Authors.
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.spark.sql.delta.perf
 
 import org.apache.gluten.backendsapi.BackendsApiManager
@@ -22,7 +22,6 @@ import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution.{ValidatablePlan, ValidationResult}
 import org.apache.gluten.extension.columnar.transition.Convention
 import org.apache.gluten.vectorized.ColumnarBatchSerializerInstance
-import org.apache.spark.sql.execution.{ColumnarCollapseTransformStages, ColumnarShuffleExchangeExec, GenerateTransformStageId}
 
 // scalastyle:off import.ordering.noEmptyLine
 import org.apache.spark._
@@ -31,16 +30,18 @@ import org.apache.spark.internal.config.ConfigEntry
 import org.apache.spark.network.util.ByteUnit
 import org.apache.spark.rdd.RDD
 import org.apache.spark.shuffle._
+import org.apache.spark.shuffle.sort.ColumnarShuffleManager
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
+import org.apache.spark.sql.delta.{DeltaErrors, DeltaLog}
 import org.apache.spark.sql.delta.metering.DeltaLogging
 import org.apache.spark.sql.delta.sources.DeltaSQLConf
 import org.apache.spark.sql.delta.util.BinPackingUtils
-import org.apache.spark.sql.delta.{DeltaErrors, DeltaLog}
+import org.apache.spark.sql.execution.{ColumnarCollapseTransformStages, ColumnarShuffleExchangeExec, GenerateTransformStageId}
+import org.apache.spark.sql.execution.{ShuffledColumnarBatchRDD, SparkPlan, UnaryExecNode}
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics, SQLShuffleReadMetricsReporter, SQLShuffleWriteMetricsReporter}
-import org.apache.spark.sql.execution.{ShuffledColumnarBatchRDD, SparkPlan, UnaryExecNode}
 import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.storage._
 import org.apache.spark.util.ThreadUtils
@@ -68,7 +69,10 @@ case class GlutenDeltaOptimizedWriterExec(
     "dataSize" -> SQLMetrics.createSizeMetric(sparkContext, "data size")
   ) ++ readMetrics ++ writeMetrics
 
-  private lazy val childNumPartitions = child.executeColumnar().getNumPartitions
+  private lazy val childNumPartitions = {
+    val numParts = child.executeColumnar().getNumPartitions
+    if (numParts == 0) 1 else numParts
+  }
 
   private lazy val numPartitions: Int = {
     val targetShuffleBlocks = getConf(DeltaSQLConf.DELTA_OPTIMIZE_WRITE_SHUFFLE_BLOCKS)
@@ -95,7 +99,8 @@ case class GlutenDeltaOptimizedWriterExec(
     val columnarShuffle =
       BackendsApiManager.getSparkPlanExecApiInstance.genColumnarShuffleExchange(shuffle)
     val columnarShuffleWithWst =
-      GenerateTransformStageId()(ColumnarCollapseTransformStages(new GlutenConfig(conf))(columnarShuffle))
+      GenerateTransformStageId()(
+        ColumnarCollapseTransformStages(new GlutenConfig(conf))(columnarShuffle))
     columnarShuffleWithWst.asInstanceOf[ColumnarShuffleExchangeExec]
   }
 
@@ -304,13 +309,19 @@ private class GlutenOptimizedWriterShuffleReader(
 
   /** Read the combined key-values for this reduce task */
   override def read(): Iterator[Product2[Int, ColumnarBatch]] = {
+    val serializerManager = dep match {
+      case _: ColumnarShuffleDependency[Int, ColumnarBatch, ColumnarBatch] =>
+        ColumnarShuffleManager.bypassDecompressionSerializerManger
+      case _ =>
+        SparkEnv.get.serializerManager
+    }
     val wrappedStreams = new ShuffleBlockFetcherIterator(
       context,
       SparkEnv.get.blockManager.blockStoreClient,
       SparkEnv.get.blockManager,
       SparkEnv.get.mapOutputTracker,
       blocks,
-      SparkEnv.get.serializerManager.wrapStream,
+      serializerManager.wrapStream,
       // Note: we use getSizeAsMb when no suffix is provided for backwards compatibility
       SparkEnv.get.conf.get(config.REDUCER_MAX_SIZE_IN_FLIGHT) * 1024 * 1024,
       SparkEnv.get.conf.get(config.REDUCER_MAX_REQS_IN_FLIGHT),
