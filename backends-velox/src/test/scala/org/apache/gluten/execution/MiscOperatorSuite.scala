@@ -721,7 +721,6 @@ class MiscOperatorSuite extends VeloxWholeStageTransformerSuite with AdaptiveSpa
       val ops = collect(df.queryExecution.executedPlan) { case p: VeloxResizeBatchesExec => p }
       assert(ops.size == 1)
       val op = ops.head
-      assert(op.minOutputBatchSize == minBatchSize)
       val metrics = op.metrics
       assert(metrics("numInputRows").value == 27)
       assert(metrics("numInputBatches").value == 14)
@@ -740,7 +739,6 @@ class MiscOperatorSuite extends VeloxWholeStageTransformerSuite with AdaptiveSpa
       val ops = collect(df.queryExecution.executedPlan) { case p: VeloxResizeBatchesExec => p }
       assert(ops.size == 1)
       val op = ops.head
-      assert(op.minOutputBatchSize == 1)
       val metrics = op.metrics
       assert(metrics("numInputRows").value == 27)
       assert(metrics("numInputBatches").value == 14)

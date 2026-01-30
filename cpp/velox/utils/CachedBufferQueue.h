@@ -14,18 +14,46 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.shuffle
 
-import org.apache.spark.TaskContext
-import org.apache.spark.sql.execution.StageExecutionMode
-import org.apache.spark.storage.{BlockId, BlockManagerId}
+#pragma once
 
-case class GlutenShuffleReaderWrapper[K, C](shuffleReader: ShuffleReader[K, C])
+#include <folly/Synchronized.h>
 
-case class GenShuffleReaderParameters[K, C](
-    handle: BaseShuffleHandle[K, _, C],
-    blocksByAddress: Iterator[(BlockManagerId, collection.Seq[(BlockId, Long, Int)])],
-    context: TaskContext,
-    readMetrics: ShuffleReadMetricsReporter,
-    shouldBatchFetch: Boolean,
-    executionMode: StageExecutionMode)
+#include <chrono>
+#include <condition_variable>
+#include <map>
+#include <mutex>
+#include <queue>
+#include <utility>
+
+namespace gluten {
+
+class GpuBufferColumnarBatch;
+
+class CachedBufferQueue {
+ public:
+  CachedBufferQueue(int64_t capacity) : capacity_(capacity) {}
+
+  void put(std::shared_ptr<GpuBufferColumnarBatch> batch);
+
+  std::shared_ptr<GpuBufferColumnarBatch> get();
+
+  void noMoreBatches();
+
+  int64_t size() const;
+
+  bool empty() const;
+
+ private:
+  int64_t capacity_;
+  int64_t totalSize_{0};
+  bool noMoreBatches_{false};
+
+  std::queue<std::shared_ptr<GpuBufferColumnarBatch>> queue_;
+
+  std::mutex m_;
+  std::condition_variable notEmpty_;
+  std::condition_variable notFull_;
+};
+
+} // namespace gluten

@@ -1013,7 +1013,7 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleWriterJniWrappe
     jdouble splitBufferReallocThreshold,
     jlong partitionWriterHandle) {
   JNI_METHOD_START
-  
+
   const auto ctx = getRuntime(env, wrapper);
 
   auto partitionWriter = ObjectStore::retrieve<PartitionWriter>(partitionWriterHandle);
@@ -1229,14 +1229,16 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
     JNIEnv* env,
     jobject wrapper,
     jlong shuffleReaderHandle,
-    jobject jStreamReader) {
+    jobject jStreamReader,
+    jint executionMode) {
   JNI_METHOD_START
   auto ctx = getRuntime(env, wrapper);
   auto reader = ObjectStore::retrieve<ShuffleReader>(shuffleReaderHandle);
 
   auto streamReader = std::make_shared<ShuffleStreamReader>(env, jStreamReader);
 
-  auto outItr = reader->read(streamReader);
+  ShuffleOutputType requiredOutputType = ShuffleReader::getOutputType(executionMode);
+  auto outItr = reader->read(streamReader, requiredOutputType);
   return ctx->saveObject(outItr);
   JNI_METHOD_END(kInvalidObjectHandle)
 }

@@ -105,8 +105,7 @@ object VeloxRuleApi {
           offloads))
 
     // Legacy: Post-transform rules.
-    injector.injectPostTransform(_ => AppendBatchResizeForShuffleInputAndOutput())
-    injector.injectPostTransform(_ => GpuBufferBatchResizeForShuffleInputOutput())
+    injector.injectPostTransform(c => AppendBatchResizeForShuffleInputAndOutput(c.caller.isAqe()))
     injector.injectPostTransform(_ => UnionTransformerRule())
     injector.injectPostTransform(_ => PartialFallbackRules())
     injector.injectPostTransform(_ => RemoveNativeWriteFilesSortAndProject())
@@ -141,6 +140,8 @@ object VeloxRuleApi {
       c => PreventBatchTypeMismatchInTableCache(c.caller.isCache(), Set(VeloxBatchType)))
     injector.injectFinal(
       c => GlutenAutoAdjustStageResourceProfile(new GlutenConfig(c.sqlConf), c.session))
+    injector.injectFinal(
+      c => AdjustStageExecutionMode(new GlutenConfig(c.sqlConf), c.session, c.caller.isAqe()))
     injector.injectFinal(c => GlutenFallbackReporter(new GlutenConfig(c.sqlConf), c.session))
     injector.injectFinal(_ => RemoveFallbackTagRule())
   }

@@ -17,6 +17,8 @@
 
 #include "GpuBufferBatchResizer.h"
 #include "cudf/GpuLock.h"
+#include "memory/GpuBufferColumnarBatch.h"
+#include "utils/Macros.h"
 #include "utils/Timer.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
@@ -178,9 +180,19 @@ GpuBufferBatchResizer::GpuBufferBatchResizer(
   VELOX_CHECK_GT(maxPrefetchSize_, 0, "maxPrefetchSize should be larger than 0");
 }
 
+int64_t GpuBufferBatchResizer::getResizeTime() const {
+  return resizeTime_;
+}
+
+int64_t GpuBufferBatchResizer::getBlockingTime() const {
+  return blockingTime_;
+}
+
+
 std::shared_ptr<GpuBufferColumnarBatch> GpuBufferBatchResizer::fetchAndComposeBatch() {
   std::vector<std::shared_ptr<GpuBufferColumnarBatch>> cachedBatches;
   int32_t cachedRows = 0;
+  LOG_THREAD("fetch batch start.");
   while (cachedRows < minOutputBatchSize_) {
     auto nextCb = in_->next();
     if (!nextCb) {
@@ -196,6 +208,7 @@ std::shared_ptr<GpuBufferColumnarBatch> GpuBufferBatchResizer::fetchAndComposeBa
     cachedRows += nextBatch->numRows();
     cachedBatches.push_back(std::move(nextBatch));
   }
+  LOG_THREAD("fetch batch end. cached rows: " << cachedRows);
 
   if (cachedRows == 0) {
     return nullptr;

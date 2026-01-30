@@ -190,6 +190,7 @@ set(VELOX_SRCS
     substrait/VeloxToSubstraitPlan.cc
     substrait/VeloxToSubstraitType.cc
     udf/UdfLoader.cc
+    utils/CachedBufferQueue.cc
     utils/Common.cc
     utils/ConfigExtractor.cc
     utils/VeloxArrowUtils.cc

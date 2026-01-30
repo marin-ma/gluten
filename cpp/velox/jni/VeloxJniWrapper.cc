@@ -466,6 +466,28 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_utils_GpuBufferBatchResizerJniWra
   return ctx->saveObject(appender);
   JNI_METHOD_END(kInvalidObjectHandle)
 }
+
+JNIEXPORT jlongArray JNICALL Java_org_apache_gluten_utils_GpuBufferBatchResizerJniWrapper_getBlockingAndResizeTime( // NOLINT
+    JNIEnv* env,
+    jobject wrapper,
+    jlong handle) {
+  JNI_METHOD_START
+  auto resultIter = ObjectStore::retrieve<ResultIterator>(handle);
+  auto batchResizer = dynamic_cast<GpuBufferBatchResizer*>(resultIter->getInputIter());
+  if (batchResizer == nullptr) {
+    throw GlutenException("Invalid batch resizer handle for getBlockingAndResizeTime");
+  }
+
+  jlong values[2];
+  values[0] = batchResizer->getBlockingTime();
+  values[1] = batchResizer->getResizeTime();
+
+  auto result = env->NewLongArray(2);
+  env->SetLongArrayRegion(result, 0, 2, values);
+  return result;
+  JNI_METHOD_END(nullptr)
+}
+
 #endif
 
 JNIEXPORT jboolean JNICALL

@@ -40,6 +40,10 @@ class GpuBufferBatchResizer : public ColumnarBatchIterator {
 
   int64_t spillFixedSize(int64_t size) override;
 
+  int64_t getBlockingTime() const;
+
+  int64_t getResizeTime() const;
+
  private:
   /// Read and compose one batch from the input iterator (CPU-only work).
   /// Returns nullptr if input is exhausted.
@@ -53,6 +57,9 @@ class GpuBufferBatchResizer : public ColumnarBatchIterator {
 
   std::deque<std::shared_ptr<GpuBufferColumnarBatch>> prefetchQueue_;
   int64_t prefetchedBytes_ = 0;
+
+  int64_t blockingTime_{0};
+  int64_t resizeTime_{0};
 };
 
 } // namespace gluten

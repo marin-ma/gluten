@@ -19,15 +19,15 @@
 #include <arrow/io/api.h>
 
 #include "config/GlutenConfig.h"
+#include "memory/GpuBufferColumnarBatch.h"
 #include "shuffle/VeloxGpuShuffleWriter.h"
 #include "shuffle/VeloxHashShuffleWriter.h"
 #include "tests/VeloxShuffleWriterTestBase.h"
 #include "tests/utils/TestAllocationListener.h"
 #include "tests/utils/TestStreamReader.h"
 #include "tests/utils/TestUtils.h"
-#include "utils/VeloxArrowUtils.h"
-#include "memory/GpuBufferColumnarBatch.h"
 #include "utils/GpuBufferBatchResizer.h"
+#include "utils/VeloxArrowUtils.h"
 
 #include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
@@ -315,14 +315,13 @@ class GpuVeloxShuffleWriterTest : public ::testing::TestWithParam<GpuShuffleTest
         GetParam().shuffleWriterType);
 
     const auto reader = std::make_shared<VeloxShuffleReader>(std::move(deserializerFactory));
-    const auto iter = reader->read(std::make_shared<TestStreamReader>(std::move(in)));
+    const auto iter = reader->read(std::make_shared<TestStreamReader>(std::move(in)), ShuffleOutputType::kCudfTable);
 
     while (iter->hasNext()) {
       auto cb = std::dynamic_pointer_cast<GpuBufferColumnarBatch>(iter->next());
       VELOX_CHECK_NOT_NULL(cb);
       bufferBatches.emplace_back(cb);
     }
-
   }
 
   void shuffleWriteReadMultiBlocks(
@@ -364,7 +363,6 @@ class GpuVeloxShuffleWriterTest : public ::testing::TestWithParam<GpuShuffleTest
         facebook::velox::test::assertEqualVectors(expectedVector, deserializedVector);
       }
     }
-
   }
 
   void testShuffleRoundTrip(

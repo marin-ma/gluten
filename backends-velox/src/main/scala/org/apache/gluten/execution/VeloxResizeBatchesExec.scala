@@ -17,13 +17,15 @@
 package org.apache.gluten.execution
 
 import org.apache.gluten.backendsapi.velox.VeloxBatchType
+import org.apache.gluten.config.VeloxConfig
 import org.apache.gluten.extension.columnar.transition.Convention
 import org.apache.gluten.iterator.ClosableIterator
-import org.apache.gluten.utils.VeloxBatchResizer
+import org.apache.gluten.utils.{GpuBufferColumnarBatchResizer, VeloxBatchResizer}
 
 import org.apache.spark.sql.catalyst.expressions.SortOrder
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
-import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.{GPUStageMode, SparkPlan, StageExecutionMode}
+import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import scala.collection.JavaConverters._
@@ -34,15 +36,40 @@ import scala.collection.JavaConverters._
  */
 case class VeloxResizeBatchesExec(
     override val child: SparkPlan,
-    minOutputBatchSize: Int,
-    maxOutputBatchSize: Int,
-    preferredBatchBytes: Long)
+    executionMode: Option[StageExecutionMode] = None)
   extends ColumnarToColumnarExec(child) {
 
+  override lazy val metrics: Map[String, SQLMetric] = Map(
+    "numInputRows" -> SQLMetrics.createMetric(sparkContext, "number of input rows"),
+    "numInputBatches" -> SQLMetrics.createMetric(sparkContext, "number of input batches"),
+    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
+    "numOutputBatches" -> SQLMetrics.createMetric(sparkContext, "number of output batches"),
+    "selfTime" -> SQLMetrics.createTimingMetric(sparkContext, "convert batches"),
+    "blockingTime" -> SQLMetrics.createNanoTimingMetric(
+      sparkContext,
+      "time to block for resizing batches"),
+    "resizeTime" -> SQLMetrics.createNanoTimingMetric(sparkContext, "time to resize batches")
+  )
+
   override protected def mapIterator(in: Iterator[ColumnarBatch]): Iterator[ColumnarBatch] = {
-    VeloxBatchResizer
-      .create(minOutputBatchSize, maxOutputBatchSize, preferredBatchBytes, in.asJava)
-      .asScala
+    val veloxConfig = VeloxConfig.get
+    executionMode match {
+      case Some(GPUStageMode) =>
+        GpuBufferColumnarBatchResizer
+          .create(
+            veloxConfig.cudfBatchSize,
+            veloxConfig.cudfShuffleMaxPrefetchBytes,
+            in.asJava,
+            longMetric("blockingTime"),
+            longMetric("resizeTime")
+          )
+          .asScala
+      case _ =>
+        val range = veloxConfig.veloxResizeBatchesShuffleInputOutputRange
+        VeloxBatchResizer
+          .create(range.min, range.max, veloxConfig.veloxPreferredBatchBytes, in.asJava)
+          .asScala
+    }
   }
 
   override protected def closeIterator(out: Iterator[ColumnarBatch]): Unit = {
