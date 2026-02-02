@@ -364,6 +364,9 @@ class GlutenConfig(conf: SQLConf) extends GlutenCoreConfig(conf) {
   def autoAdjustStageFallenNodeThreshold: Double =
     getConf(AUTO_ADJUST_STAGE_RESOURCES_FALLEN_NODE_RATIO_THRESHOLD)
 
+  def autoAdjustStageExecutionMode: Boolean =
+    getConf(AUTO_ADJUST_STAGE_EXECUTION_MODE)
+
   def parquetMetadataValidationEnabled: Boolean = {
     getConf(PARQUET_UNEXPECTED_METADATA_FALLBACK_ENABLED)
   }
@@ -1528,6 +1531,13 @@ object GlutenConfig extends ConfigRegistry {
         "count exceeds the total node count ratio.")
       .doubleConf
       .createWithDefault(0.5d)
+
+  val AUTO_ADJUST_STAGE_EXECUTION_MODE =
+    buildConf("spark.gluten.auto.adjustStageExecutionMode")
+      .experimental()
+      .doc("Experimental: Auto adjust execution mode according to the stage execution plan.")
+      .booleanConf
+      .createWithDefault(false)
 
   val PARQUET_UNEXPECTED_METADATA_FALLBACK_ENABLED =
     buildConf("spark.gluten.sql.fallbackUnexpectedMetadataParquet")
