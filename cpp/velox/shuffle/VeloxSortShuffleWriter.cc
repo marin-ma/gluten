@@ -273,7 +273,7 @@ arrow::Status VeloxSortShuffleWriter::evictAllPartitions() {
     pageNumber_ = 0;
     pageCursor_ = 0;
 
-    // Reset and reallocate array_ to minimal size. Allocate array_ can trigger spill.
+    // Reset and reallocate array_ to minimal size.
     allocateMinimalArray();
   }
   return arrow::Status::OK();
@@ -423,7 +423,6 @@ uint32_t VeloxSortShuffleWriter::newArraySize(uint32_t rows) {
 }
 
 void VeloxSortShuffleWriter::setUpArray(facebook::velox::BufferPtr&& array) {
-  array_.reset();
   array_ = std::move(array);
   // Capacity is a multiple of 8 (bytes).
   auto capacity = array_->capacity() & 0xfffffff8;
@@ -445,6 +444,8 @@ int64_t VeloxSortShuffleWriter::totalC2RTime() const {
 }
 
 void VeloxSortShuffleWriter::allocateMinimalArray() {
+  // Free old array_ first to avoid OOM on new allocation.
+  array_.reset();
   auto array =
       facebook::velox::AlignedBuffer::allocate<char>(initialSortBufferSize_ * sizeof(uint64_t), veloxPool_.get());
   setUpArray(std::move(array));
