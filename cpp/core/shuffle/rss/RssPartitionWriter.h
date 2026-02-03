@@ -61,8 +61,6 @@ class RssPartitionWriter final : public PartitionWriter {
  private:
   void init();
 
-  arrow::Status doEvict(uint32_t partitionId, std::unique_ptr<InMemoryPayload> inMemoryPayload, int64_t& evictBytes);
-
   std::shared_ptr<RssPartitionWriterOptions> options_;
   std::shared_ptr<RssClient> rssClient_;
 
