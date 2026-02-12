@@ -84,8 +84,7 @@ jint JNI_OnLoad(JavaVM* vm, void*) {
       createGlobalClassReferenceOrError(env, "Lorg/apache/spark/sql/execution/datasources/BlockStripes;");
   blockStripesConstructor = getMethodIdOrError(env, blockStripesClass, "<init>", "(J[J[II[[B)V");
 
-  batchWriteMetricsClass =
-    createGlobalClassReferenceOrError(env, "Lorg/apache/gluten/metrics/BatchWriteMetrics;");
+  batchWriteMetricsClass = createGlobalClassReferenceOrError(env, "Lorg/apache/gluten/metrics/BatchWriteMetrics;");
   batchWriteMetricsConstructor = getMethodIdOrError(env, batchWriteMetricsClass, "<init>", "(JIJJ)V");
 
   DLOG(INFO) << "Loaded Velox backend.";
@@ -439,8 +438,8 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_utils_VeloxBatchResizerJniWrapper
   auto ctx = getRuntime(env, wrapper);
   auto pool = dynamic_cast<VeloxMemoryManager*>(ctx->memoryManager())->getLeafMemoryPool();
   auto iter = makeJniColumnarBatchIterator(env, jIter, ctx);
-  auto appender = std::make_shared<ResultIterator>(
-      std::make_unique<VeloxBatchResizer>(pool.get(), minOutputBatchSize, maxOutputBatchSize, preferredBatchBytes, std::move(iter)));
+  auto appender = std::make_shared<ResultIterator>(std::make_unique<VeloxBatchResizer>(
+      pool.get(), minOutputBatchSize, maxOutputBatchSize, preferredBatchBytes, std::move(iter)));
   return ctx->saveObject(appender);
   JNI_METHOD_END(kInvalidObjectHandle)
 }
@@ -461,6 +460,28 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_utils_GpuBufferBatchResizerJniWra
   return ctx->saveObject(appender);
   JNI_METHOD_END(kInvalidObjectHandle)
 }
+
+JNIEXPORT jlongArray JNICALL Java_org_apache_gluten_utils_GpuBufferBatchResizerJniWrapper_getBlockingAndResizeTime( // NOLINT
+    JNIEnv* env,
+    jobject wrapper,
+    jlong handle) {
+  JNI_METHOD_START
+  auto resultIter = ObjectStore::retrieve<ResultIterator>(handle);
+  auto batchResizer = dynamic_cast<GpuBufferBatchResizer*>(resultIter->getInputIter());
+  if (batchResizer == nullptr) {
+    throw GlutenException("Invalid batch resizer handle for getBlockingAndResizeTime");
+  }
+
+  jlong values[2];
+  values[0] = batchResizer->getBlockingTime();
+  values[1] = batchResizer->getResizeTime();
+
+  auto result = env->NewLongArray(2);
+  env->SetLongArrayRegion(result, 0, 2, values);
+  return result;
+  JNI_METHOD_END(nullptr)
+}
+
 #endif
 
 JNIEXPORT jboolean JNICALL
@@ -583,12 +604,15 @@ Java_org_apache_gluten_datasource_VeloxDataSourceJniWrapper_splitBlockByPartitio
   const auto numRows = inputRowVector->size();
 
   connector::hive::PartitionIdGenerator idGen(
-      asRowType(inputRowVector->type()), partitionColIndicesVec, 65536, pool.get()
+      asRowType(inputRowVector->type()),
+      partitionColIndicesVec,
+      65536,
+      pool.get()
 #ifdef GLUTEN_ENABLE_ENHANCED_FEATURES
-      ,
+          ,
       true
-#endif    
-    );
+#endif
+  );
   raw_vector<uint64_t> partitionIds{};
   idGen.run(inputRowVector, partitionIds);
   GLUTEN_CHECK(partitionIds.size() == numRows, "Mismatched number of partition ids");
@@ -914,12 +938,12 @@ JNIEXPORT jobject JNICALL Java_org_apache_gluten_execution_IcebergWriteJniWrappe
   auto writer = ObjectStore::retrieve<IcebergWriter>(writerHandle);
   auto writeStats = writer->writeStats();
   jobject writeMetrics = env->NewObject(
-    batchWriteMetricsClass,
-    batchWriteMetricsConstructor,
-    writeStats.numWrittenBytes,
-    writeStats.numWrittenFiles,
-    writeStats.writeIOTimeNs,
-    writeStats.writeWallNs);
+      batchWriteMetricsClass,
+      batchWriteMetricsConstructor,
+      writeStats.numWrittenBytes,
+      writeStats.numWrittenFiles,
+      writeStats.writeIOTimeNs,
+      writeStats.writeWallNs);
   return writeMetrics;
 
   JNI_METHOD_END(nullptr)

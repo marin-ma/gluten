@@ -16,6 +16,7 @@
  */
 
 #include "memory/ColumnarBatchIterator.h"
+#include "memory/GpuBufferColumnarBatch.h"
 #include "memory/VeloxColumnarBatch.h"
 #include "utils/Exception.h"
 #include "velox/common/memory/MemoryPool.h"
@@ -34,11 +35,20 @@ class GpuBufferBatchResizer : public ColumnarBatchIterator {
 
   int64_t spillFixedSize(int64_t size) override;
 
+  int64_t getBlockingTime() const;
+
+  int64_t getResizeTime() const;
+
  private:
+  std::shared_ptr<GpuBufferColumnarBatch> nextBatch();
+
   arrow::MemoryPool* arrowPool_;
   facebook::velox::memory::MemoryPool* pool_;
   const int32_t minOutputBatchSize_;
   std::unique_ptr<ColumnarBatchIterator> in_;
+
+  int64_t blockingTime_{0};
+  int64_t resizeTime_{0};
 };
 
 } // namespace gluten
