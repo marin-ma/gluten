@@ -18,6 +18,7 @@
 #include "GpuBufferBatchResizer.h"
 #include "cudf/GpuLock.h"
 #include "memory/GpuBufferColumnarBatch.h"
+#include "utils/Macros.h"
 #include "utils/Timer.h"
 #include "velox/experimental/cudf/exec/Utilities.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
@@ -175,6 +176,7 @@ GpuBufferBatchResizer::GpuBufferBatchResizer(
 
 std::shared_ptr<ColumnarBatch> GpuBufferBatchResizer::next() {
   if (auto batch = nextBatch()) {
+    LOG_THREAD("compose batch end");
     ScopedTimer timer(&blockingTime_);
     lockGpu();
     return makeCudfTable(batch->getRowType(), batch->numRows(), batch->buffers(), pool_);
@@ -198,6 +200,7 @@ std::shared_ptr<GpuBufferColumnarBatch> GpuBufferBatchResizer::nextBatch() {
   ScopedTimer timer(&resizeTime_);
   std::vector<std::shared_ptr<GpuBufferColumnarBatch>> cachedBatches;
   int32_t cachedRows = 0;
+  LOG_THREAD("fetch batch start.");
   while (cachedRows < minOutputBatchSize_) {
     auto nextCb = in_->next();
     if (!nextCb) {
@@ -214,6 +217,7 @@ std::shared_ptr<GpuBufferColumnarBatch> GpuBufferBatchResizer::nextBatch() {
     cachedRows += nextBatch->numRows();
     cachedBatches.push_back(std::move(nextBatch));
   }
+  LOG_THREAD("fetch batch end. cached rows: " << cachedRows);
 
   if (cachedRows == 0) {
     return nullptr;

@@ -63,5 +63,7 @@ class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator
 
   bool reachedEos_{false};
   bool blockTypeResolved_{false};
+
+  bool nextCalled_{false};
 };
 } // namespace gluten
