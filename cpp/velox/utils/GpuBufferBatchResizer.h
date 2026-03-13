@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include "CachedBufferQueue.h"
 #include "memory/ColumnarBatchIterator.h"
 #include "memory/GpuBufferColumnarBatch.h"
 #include "memory/VeloxColumnarBatch.h"
@@ -29,7 +30,10 @@ class GpuBufferBatchResizer : public ColumnarBatchIterator {
       arrow::MemoryPool* arrowPool,
       facebook::velox::memory::MemoryPool* pool,
       int32_t minOutputBatchSize,
+      int64_t memLimit,
       std::unique_ptr<ColumnarBatchIterator> in);
+
+  ~GpuBufferBatchResizer();
 
   std::shared_ptr<ColumnarBatch> next() override;
 
@@ -49,6 +53,9 @@ class GpuBufferBatchResizer : public ColumnarBatchIterator {
 
   int64_t blockingTime_{0};
   int64_t resizeTime_{0};
+
+  std::thread batchProducer_;
+  std::unique_ptr<CachedBufferQueue> queue_;
 };
 
 } // namespace gluten

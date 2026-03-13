@@ -22,8 +22,7 @@ import org.apache.gluten.iterator.ClosableIterator
 import org.apache.gluten.memory.arrow.alloc.ArrowBufferAllocators
 import org.apache.gluten.runtime.Runtimes
 import org.apache.gluten.utils.ArrowAbiUtil
-
-import org.apache.spark.SparkEnv
+import org.apache.spark.{SparkEnv, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.serializer.{DeserializationStream, SerializationStream, Serializer, SerializerInstance}
 import org.apache.spark.shuffle.GlutenShuffleUtils
@@ -35,7 +34,6 @@ import org.apache.spark.sql.utils.SparkSchemaUtil
 import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.storage.BlockId
 import org.apache.spark.task.{TaskResource, TaskResources}
-
 import org.apache.arrow.c.ArrowSchema
 import org.apache.arrow.memory.BufferAllocator
 
@@ -43,7 +41,6 @@ import java.io._
 import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
-
 import scala.reflect.ClassTag
 
 class ColumnarBatchSerializer(
@@ -168,6 +165,8 @@ private class ColumnarBatchSerializerInstanceImpl(
 
     private val resourceId = UUID.randomUUID().toString
 
+    private val taskContext = TaskContext.get()
+
     TaskResources.addResource(resourceId, this)
 
     override def asIterator: Iterator[Any] = {
@@ -220,6 +219,10 @@ private class ColumnarBatchSerializerInstanceImpl(
     override def close(): Unit = {
       if (!closeCalled.compareAndSet(false, true)) {
         return
+      }
+
+      if (!TaskResources.inSparkTask()) {
+        TaskResources.setTaskContext(taskContext)
       }
       // Would remove the resource object from registry to lower GC pressure.
       TaskResources.releaseResource(resourceId)

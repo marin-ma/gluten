@@ -172,6 +172,14 @@ object TaskResources extends TaskListener with Logging {
     getTaskResourceRegistry().releaseResource(id)
   }
 
+  def setTaskContext(context: TaskContext): Unit = {
+    if (inSparkTask()) {
+      throw new UnsupportedOperationException(
+        "TaskResources#setTaskContext should only be called outside Spark task")
+    }
+    TaskContext.setTaskContext(context)
+  }
+
   def addResourceIfNotRegistered[T <: TaskResource](id: String, factory: () => T): T = {
     getTaskResourceRegistry().addResourceIfNotRegistered(id, factory)
   }

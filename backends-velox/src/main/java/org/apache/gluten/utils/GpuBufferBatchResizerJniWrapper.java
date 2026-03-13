@@ -36,7 +36,7 @@ public class GpuBufferBatchResizerJniWrapper implements RuntimeAware {
     return runtime.getHandle();
   }
 
-  public native long create(int minOutputBatchSize, ColumnarBatchInIterator itr);
+  public native long create(int minOutputBatchSize, long memLimit, ColumnarBatchInIterator itr);
 
   public native long[] getBlockingAndResizeTime(long iterHandle);
 }

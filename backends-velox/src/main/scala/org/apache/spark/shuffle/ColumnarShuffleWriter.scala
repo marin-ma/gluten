@@ -122,12 +122,6 @@ class ColumnarShuffleWriter[K, V](
 
   private val taskContext: TaskContext = TaskContext.get()
 
-  private def availableOffHeapPerTask(): Long = {
-    val perTask =
-      SparkMemoryUtil.getCurrentAvailableOffHeapMemory / SparkResourceUtil.getTaskSlots(conf)
-    perTask
-  }
-
   @throws[IOException]
   def internalWrite(records: Iterator[Product2[K, V]]): Unit = {
     if (!records.hasNext) {
@@ -218,7 +212,7 @@ class ColumnarShuffleWriter[K, V](
           nativeShuffleWriter,
           rows,
           columnarBatchHandle,
-          availableOffHeapPerTask())
+          SparkMemoryUtil.availableOffHeapPerTask(conf))
         dep.metrics("shuffleWallTime").add(System.nanoTime() - startTime)
         dep.metrics("numInputRows").add(rows)
         dep.metrics("inputBatches").add(1)

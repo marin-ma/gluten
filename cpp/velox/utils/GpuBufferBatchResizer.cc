@@ -169,13 +169,28 @@ GpuBufferBatchResizer::GpuBufferBatchResizer(
     arrow::MemoryPool* arrowPool,
     facebook::velox::memory::MemoryPool* pool,
     int32_t minOutputBatchSize,
+    int64_t memLimit,
     std::unique_ptr<ColumnarBatchIterator> in)
     : arrowPool_(arrowPool), pool_(pool), minOutputBatchSize_(minOutputBatchSize), in_(std::move(in)) {
   VELOX_CHECK_GT(minOutputBatchSize_, 0, "minOutputBatchSize should be larger than 0");
+  queue_ = std::make_unique<CachedBufferQueue>(memLimit);
+  batchProducer_ = std::thread([this]() {
+    while (auto batch = nextBatch()) {
+      queue_->put(batch);
+    }
+    queue_->noMoreBatches();
+  });
+}
+
+GpuBufferBatchResizer::~GpuBufferBatchResizer() {
+  if (batchProducer_.joinable()) {
+    batchProducer_.join();
+  }
+  VELOX_CHECK_EQ(queue_->size(), 0);
 }
 
 std::shared_ptr<ColumnarBatch> GpuBufferBatchResizer::next() {
-  if (auto batch = nextBatch()) {
+  if (auto batch = queue_->get()) {
     LOG_THREAD("compose batch end");
     ScopedTimer timer(&blockingTime_);
     lockGpu();

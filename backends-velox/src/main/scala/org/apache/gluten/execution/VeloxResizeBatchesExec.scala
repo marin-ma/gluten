@@ -58,6 +58,10 @@ case class VeloxResizeBatchesExec(
         GpuBufferColumnarBatchResizer
           .create(
             veloxConfig.cudfBatchSize,
+            Math
+              .floor(SparkMemoryUtil.availableOffHeapPerTask(
+                SparkEnv.get.conf) * veloxConfig.cudfShuffleReaderMemoryPct)
+              .toLong,
             in.asJava,
             longMetric("blockingTime"),
             longMetric("resizeTime")
