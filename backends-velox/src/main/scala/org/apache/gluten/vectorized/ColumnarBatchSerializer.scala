@@ -244,7 +244,6 @@ private class ColumnarBatchSerializerInstanceImpl(
       }
       numOutputRows += numRowsTotal
       wrappedOut.close()
-      streamReader.close()
       if (cb != null) {
         cb.close()
       }
