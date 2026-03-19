@@ -68,6 +68,8 @@ class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator
   std::atomic<int64_t> deserializeTimeCounter_{0};
   std::atomic<int64_t> decompressTimeCounter_{0};
 
+  bool readerStarted_{false};
+
   std::vector<std::thread> readerThreads_;
   std::unique_ptr<CachedBatchQueue<GpuBufferColumnarBatch>> batchQueue_;
   std::atomic<bool> stopReaders_{false};

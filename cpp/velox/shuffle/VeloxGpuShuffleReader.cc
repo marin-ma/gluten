@@ -65,19 +65,7 @@ VeloxGpuHashShuffleReaderDeserializer::VeloxGpuHashShuffleReaderDeserializer(
       readerBufferSize_(readerBufferSize),
       memoryManager_(memoryManager),
       deserializeTime_(deserializeTime),
-      decompressTime_(decompressTime) {
-  batchQueue_ = std::make_unique<CachedBatchQueue<GpuBufferColumnarBatch>>(1L << 30);
-
-  const size_t numThreads = std::max(1u, std::thread::hardware_concurrency());
-  activeReaders_.store(numThreads);
-  LOG(WARNING) << "Using " << numThreads << " threads for deserialization";
-
-  // Create multiple reader threads
-  readerThreads_.reserve(numThreads);
-  for (size_t i = 0; i < numThreads; ++i) {
-    readerThreads_.emplace_back([this]() { read(); });
-  }
-}
+      decompressTime_(decompressTime) {}
 
 VeloxGpuHashShuffleReaderDeserializer::~VeloxGpuHashShuffleReaderDeserializer() {
   decompressTime_ += decompressTimeCounter_.load(std::memory_order_relaxed);
@@ -157,6 +145,22 @@ void VeloxGpuHashShuffleReaderDeserializer::read() {
 }
 
 std::shared_ptr<ColumnarBatch> VeloxGpuHashShuffleReaderDeserializer::next() {
+  if (!readerStarted_) {
+    batchQueue_ = std::make_unique<CachedBatchQueue<GpuBufferColumnarBatch>>(1L << 30);
+
+    const size_t numThreads = std::max(1u, std::thread::hardware_concurrency());
+    activeReaders_.store(numThreads);
+    LOG(WARNING) << "Using " << numThreads << " threads for deserialization";
+
+    // Create multiple reader threads
+    readerThreads_.reserve(numThreads);
+    for (size_t i = 0; i < numThreads; ++i) {
+      readerThreads_.emplace_back([this]() { read(); });
+    }
+
+    readerStarted_ = true;
+  }
+
   return batchQueue_->get();
 }
 
