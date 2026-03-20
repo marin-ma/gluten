@@ -68,6 +68,8 @@ class GpuBufferColumnarBatch final : public ColumnarBatch {
   inline static const std::string kType{"gpu"};
   facebook::velox::RowTypePtr rowType_;
   std::vector<std::shared_ptr<arrow::Buffer>> buffers_;
+
+  std::optional<int64_t> numBytes_;
 };
 
 } // namespace gluten
