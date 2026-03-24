@@ -236,7 +236,7 @@ final private[spark] class GlutenShuffleBlockFetcherIterator(
   }
 
   /** Mark the iterator as zombie, and release all buffers that haven't been deserialized yet. */
-  private[storage] def cleanup(): Unit = {
+  def cleanup(): Unit = {
     synchronized {
       isZombie = true
     }

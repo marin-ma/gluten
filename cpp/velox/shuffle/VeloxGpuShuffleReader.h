@@ -20,6 +20,7 @@
 #include "memory/GpuBufferColumnarBatch.h"
 #include "memory/VeloxMemoryManager.h"
 #include "shuffle/Payload.h"
+#include "shuffle/ReaderThreadPool.h"
 #include "shuffle/ShuffleReader.h"
 #include "utils/CachedBatchQueue.h"
 
@@ -28,8 +29,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <thread>
-#include <vector>
 
 namespace gluten {
 
@@ -44,6 +43,7 @@ class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator
       const facebook::velox::RowTypePtr& rowType,
       int64_t readerBufferSize,
       VeloxMemoryManager* memoryManager,
+      ReaderThreadPool* threadPool,
       int64_t& deserializeTime,
       int64_t& decompressTime);
 
@@ -61,6 +61,7 @@ class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator
   facebook::velox::RowTypePtr rowType_;
   int64_t readerBufferSize_;
   VeloxMemoryManager* memoryManager_;
+  ReaderThreadPool* threadPool_;
 
   int64_t& deserializeTime_;
   int64_t& decompressTime_;
@@ -70,9 +71,7 @@ class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator
 
   bool readerStarted_{false};
 
-  std::vector<std::thread> readerThreads_;
   std::unique_ptr<CachedBatchQueue<GpuBufferColumnarBatch>> batchQueue_;
-  std::atomic<bool> stopReaders_{false};
   std::atomic<int> activeReaders_{0};
 
   std::mutex mtx_;

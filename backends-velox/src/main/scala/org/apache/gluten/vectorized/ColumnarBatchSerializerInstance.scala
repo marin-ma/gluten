@@ -30,6 +30,7 @@ abstract class ColumnarBatchSerializerInstance extends SerializerInstance {
   /** Deserialize the streams of ColumnarBatches. */
   def deserializeStreams(
       streams: Iterator[(BlockId, InputStream)],
+      completionFunction: () => Unit,
       executionMode: StageExecutionMode = CPUStageMode): DeserializationStream
 
   override def serialize[T: ClassTag](t: T): ByteBuffer = {

@@ -449,6 +449,7 @@ VeloxHashShuffleReaderDeserializer::VeloxHashShuffleReaderDeserializer(
     const facebook::velox::RowTypePtr& rowType,
     int64_t readerBufferSize,
     VeloxMemoryManager* memoryManager,
+    ReaderThreadPool* threadPool,
     int64_t& deserializeTime,
     int64_t& decompressTime)
     : streamReader_(streamReader),
@@ -457,31 +458,13 @@ VeloxHashShuffleReaderDeserializer::VeloxHashShuffleReaderDeserializer(
       rowType_(rowType),
       readerBufferSize_(readerBufferSize),
       memoryManager_(memoryManager),
+      threadPool_(threadPool),
       deserializeTime_(deserializeTime),
-      decompressTime_(decompressTime) {
-  batchQueue_ = std::make_unique<CachedBatchQueue<ColumnarBatch>>(1L << 30);
-
-  const size_t numThreads = std::max(1u, std::thread::hardware_concurrency());
-  activeReaders_.store(numThreads);
-  LOG(WARNING) << "Using " << numThreads << " threads for deserialization";
-
-  // Create multiple producer threads
-  readerThreads_.reserve(numThreads);
-  for (size_t i = 0; i < numThreads; ++i) {
-    readerThreads_.emplace_back([this]() { read(); });
-  }
-}
+      decompressTime_(decompressTime) {}
 
 VeloxHashShuffleReaderDeserializer::~VeloxHashShuffleReaderDeserializer() {
   decompressTime_ += decompressTimeCounter_.load(std::memory_order_relaxed);
   deserializeTime_ += deserializeTimeCounter_.load(std::memory_order_relaxed);
-  stopReaders_.store(true, std::memory_order_release);
-
-  for (auto& thread : readerThreads_) {
-    if (thread.joinable()) {
-      thread.join();
-    }
-  }
 }
 
 void VeloxHashShuffleReaderDeserializer::read() {
@@ -490,10 +473,15 @@ void VeloxHashShuffleReaderDeserializer::read() {
   std::vector<int32_t> dictionaryFields;
   std::vector<VectorPtr> dictionaries;
 
-  while (!stopReaders_.load(std::memory_order_acquire)) {
+  while (true) {
+    // Check if shutdown has been requested
+    if (threadPool_ && threadPool_->isShutdown()) {
+      break;
+    }
+
     // Load next stream for this thread
     if (inputStream == nullptr) {
-      std::lock_guard<std::mutex> lockGuard(mtx_);
+      std::lock_guard<std::mutex> lockGuard(readStreamMtx_);
       auto rawStream = streamReader_->readNextStream(memoryManager_->defaultArrowMemoryPool());
       if (rawStream == nullptr) {
         // No more streams available
@@ -585,6 +573,25 @@ void VeloxHashShuffleReaderDeserializer::read() {
 }
 
 std::shared_ptr<ColumnarBatch> VeloxHashShuffleReaderDeserializer::next() {
+  if (!readerStarted_) {
+    batchQueue_ = std::make_unique<CachedBatchQueue<ColumnarBatch>>(1L << 30);
+
+    if (!threadPool_) {
+      throw GlutenException("Thread pool must be provided to VeloxGpuHashShuffleReaderDeserializer");
+    }
+
+    const size_t numThreads = threadPool_->getNumThreads();
+    activeReaders_.store(numThreads);
+    LOG(WARNING) << "Using " << numThreads << " threads for deserialization";
+
+    // Submit reader tasks to the thread pool
+    for (size_t i = 0; i < numThreads; ++i) {
+      threadPool_->submit([this]() { read(); });
+    }
+
+    readerStarted_ = true;
+  }
+
   return batchQueue_->get();
 }
 
@@ -851,7 +858,7 @@ size_t VeloxRssSortShuffleReaderDeserializer::VeloxInputStream::remainingSize() 
   return std::numeric_limits<unsigned long>::max();
 }
 
-VeloxShuffleReaderDeserializerFactory::VeloxShuffleReaderDeserializerFactory(
+VeloxShuffleReader::VeloxShuffleReader(
     const std::shared_ptr<arrow::Schema>& schema,
     const std::shared_ptr<arrow::util::Codec>& codec,
     facebook::velox::common::CompressionKind veloxCompressionType,
@@ -860,7 +867,8 @@ VeloxShuffleReaderDeserializerFactory::VeloxShuffleReaderDeserializerFactory(
     int64_t readerBufferSize,
     int64_t deserializerBufferSize,
     VeloxMemoryManager* memoryManager,
-    ShuffleWriterType shuffleWriterType)
+    ShuffleWriterType shuffleWriterType,
+    int32_t numReaderThreads)
     : schema_(schema),
       codec_(codec),
       veloxCompressionType_(veloxCompressionType),
@@ -869,16 +877,18 @@ VeloxShuffleReaderDeserializerFactory::VeloxShuffleReaderDeserializerFactory(
       readerBufferSize_(readerBufferSize),
       deserializerBufferSize_(deserializerBufferSize),
       memoryManager_(memoryManager),
-      shuffleWriterType_(shuffleWriterType) {
+      shuffleWriterType_(shuffleWriterType),
+      numReaderThreads_(numReaderThreads) {
   initFromSchema();
 }
 
-std::unique_ptr<ColumnarBatchIterator> VeloxShuffleReaderDeserializerFactory::createDeserializer(
+std::unique_ptr<ColumnarBatchIterator> VeloxShuffleReader::createDeserializer(
     const std::shared_ptr<StreamReader>& streamReader,
     ShuffleOutputType requiredOutputType) {
   switch (shuffleWriterType_) {
     case ShuffleWriterType::kHashShuffle:
     case ShuffleWriterType::kGpuHashShuffle:
+      readerThreadPool_ = std::make_unique<ReaderThreadPool>(numReaderThreads_);
       if (requiredOutputType == ShuffleOutputType::kCudfTable) {
 #ifdef GLUTEN_ENABLE_GPU
         VELOX_CHECK(!hasComplexType_);
@@ -889,6 +899,7 @@ std::unique_ptr<ColumnarBatchIterator> VeloxShuffleReaderDeserializerFactory::cr
             rowType_,
             readerBufferSize_,
             memoryManager_,
+            readerThreadPool_.get(),
             deserializeTime_,
             decompressTime_);
 #else
@@ -902,6 +913,7 @@ std::unique_ptr<ColumnarBatchIterator> VeloxShuffleReaderDeserializerFactory::cr
           rowType_,
           readerBufferSize_,
           memoryManager_,
+          readerThreadPool_.get(),
           deserializeTime_,
           decompressTime_);
     case ShuffleWriterType::kSortShuffle:
@@ -928,15 +940,7 @@ std::unique_ptr<ColumnarBatchIterator> VeloxShuffleReaderDeserializerFactory::cr
   GLUTEN_UNREACHABLE();
 }
 
-int64_t VeloxShuffleReaderDeserializerFactory::getDecompressTime() {
-  return decompressTime_;
-}
-
-int64_t VeloxShuffleReaderDeserializerFactory::getDeserializeTime() {
-  return deserializeTime_;
-}
-
-void VeloxShuffleReaderDeserializerFactory::initFromSchema() {
+void VeloxShuffleReader::initFromSchema() {
   GLUTEN_ASSIGN_OR_THROW(auto arrowColumnTypes, toShuffleTypeId(schema_->fields()));
   isValidityBuffer_.reserve(arrowColumnTypes.size());
   for (size_t i = 0; i < arrowColumnTypes.size(); ++i) {
@@ -966,20 +970,23 @@ void VeloxShuffleReaderDeserializerFactory::initFromSchema() {
   }
 }
 
-VeloxShuffleReader::VeloxShuffleReader(std::unique_ptr<VeloxShuffleReaderDeserializerFactory> factory)
-    : factory_(std::move(factory)) {}
-
 std::shared_ptr<ResultIterator> VeloxShuffleReader::read(
     const std::shared_ptr<StreamReader>& streamReader,
     ShuffleOutputType requiredOutputType) {
-  return std::make_shared<ResultIterator>(factory_->createDeserializer(streamReader, requiredOutputType));
+  return std::make_shared<ResultIterator>(createDeserializer(streamReader, requiredOutputType));
 }
 
 int64_t VeloxShuffleReader::getDecompressTime() const {
-  return factory_->getDecompressTime();
+  return decompressTime_;
 }
 
 int64_t VeloxShuffleReader::getDeserializeTime() const {
-  return factory_->getDeserializeTime();
+  return deserializeTime_;
+}
+
+void VeloxShuffleReader::stop() {
+  if (readerThreadPool_ != nullptr) {
+    readerThreadPool_->shutdown();
+  }
 }
 } // namespace gluten

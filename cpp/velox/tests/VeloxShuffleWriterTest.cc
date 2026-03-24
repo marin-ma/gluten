@@ -299,7 +299,7 @@ class VeloxShuffleWriterTest : public ::testing::TestWithParam<ShuffleTestParams
     auto codec = createCompressionCodec(compressionType, CodecBackend::NONE);
 
     // Set batchSize to a large value to make all batches are merged by reader.
-    auto deserializerFactory = std::make_unique<gluten::VeloxShuffleReaderDeserializerFactory>(
+    const auto reader = std::make_shared<gluten::VeloxShuffleReader>(
         schema,
         std::move(codec),
         veloxCompressionType,
@@ -308,9 +308,8 @@ class VeloxShuffleWriterTest : public ::testing::TestWithParam<ShuffleTestParams
         kDefaultReadBufferSize,
         GetParam().deserializerBufferSize,
         getDefaultMemoryManager(),
-        GetParam().shuffleWriterType);
-
-    const auto reader = std::make_shared<VeloxShuffleReader>(std::move(deserializerFactory));
+        GetParam().shuffleWriterType,
+        2);
 
     const auto iter = reader->read(std::make_shared<TestStreamReader>(std::move(in)), ShuffleOutputType::kRowVector);
     while (iter->hasNext()) {

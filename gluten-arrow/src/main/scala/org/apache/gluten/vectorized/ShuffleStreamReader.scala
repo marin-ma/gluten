@@ -26,7 +26,8 @@ case class ShuffleStreamReader(streams: Iterator[(BlockId, InputStream)]) {
       JniByteInputStreams.create(in)
   }
 
-  // Called from native side to get the next stream.
+  // Called from native side to get the next stream. The native caller should make sure
+  // the streams are properly closed.
   def nextStream(): JniByteInputStream = {
     if (jniStreams.hasNext) {
       jniStreams.next

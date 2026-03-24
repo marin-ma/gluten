@@ -56,6 +56,7 @@ VeloxGpuHashShuffleReaderDeserializer::VeloxGpuHashShuffleReaderDeserializer(
     const facebook::velox::RowTypePtr& rowType,
     int64_t readerBufferSize,
     VeloxMemoryManager* memoryManager,
+    ReaderThreadPool* threadPool,
     int64_t& deserializeTime,
     int64_t& decompressTime)
     : streamReader_(streamReader),
@@ -64,25 +65,24 @@ VeloxGpuHashShuffleReaderDeserializer::VeloxGpuHashShuffleReaderDeserializer(
       rowType_(rowType),
       readerBufferSize_(readerBufferSize),
       memoryManager_(memoryManager),
+      threadPool_(threadPool),
       deserializeTime_(deserializeTime),
       decompressTime_(decompressTime) {}
 
 VeloxGpuHashShuffleReaderDeserializer::~VeloxGpuHashShuffleReaderDeserializer() {
   decompressTime_ += decompressTimeCounter_.load(std::memory_order_relaxed);
   deserializeTime_ += deserializeTimeCounter_.load(std::memory_order_relaxed);
-  stopReaders_.store(true, std::memory_order_release);
-
-  for (auto& thread : readerThreads_) {
-    if (thread.joinable()) {
-      thread.join();
-    }
-  }
 }
 
 void VeloxGpuHashShuffleReaderDeserializer::read() {
   std::shared_ptr<arrow::io::InputStream> inputStream = nullptr;
 
-  while (!stopReaders_.load(std::memory_order_acquire)) {
+  while (true) {
+    // Check if shutdown has been requested
+    if (threadPool_ && threadPool_->isShutdown()) {
+      break;
+    }
+
     if (inputStream == nullptr) {
       std::lock_guard<std::mutex> lockGuard(mtx_);
       auto rawStream = streamReader_->readNextStream(memoryManager_->defaultArrowMemoryPool());
@@ -148,14 +148,17 @@ std::shared_ptr<ColumnarBatch> VeloxGpuHashShuffleReaderDeserializer::next() {
   if (!readerStarted_) {
     batchQueue_ = std::make_unique<CachedBatchQueue<GpuBufferColumnarBatch>>(1L << 30);
 
-    const size_t numThreads = std::max(1u, std::thread::hardware_concurrency());
+    if (!threadPool_) {
+      throw GlutenException("Thread pool must be provided to VeloxGpuHashShuffleReaderDeserializer");
+    }
+
+    const size_t numThreads = threadPool_->getNumThreads();
     activeReaders_.store(numThreads);
     LOG(WARNING) << "Using " << numThreads << " threads for deserialization";
 
-    // Create multiple reader threads
-    readerThreads_.reserve(numThreads);
+    // Submit reader tasks to the thread pool
     for (size_t i = 0; i < numThreads; ++i) {
-      readerThreads_.emplace_back([this]() { read(); });
+      threadPool_->submit([this]() { read(); });
     }
 
     readerStarted_ = true;

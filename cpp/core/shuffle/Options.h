@@ -62,6 +62,8 @@ struct ShuffleReaderOptions {
 
   // Buffer size when deserializing rows into columnar batches. Only used for sort-based shuffle.
   int64_t deserializerBufferSize = kDefaultDeserializerBufferSize;
+
+  int32_t numReaderThreads = std::thread::hardware_concurrency();
 };
 
 struct ShuffleWriterOptions {

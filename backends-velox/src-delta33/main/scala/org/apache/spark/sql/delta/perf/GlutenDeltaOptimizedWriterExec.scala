@@ -336,7 +336,7 @@ private class GlutenOptimizedWriterShuffleReader(
       SparkEnv.get.conf.get(config.SHUFFLE_CHECKSUM_ALGORITHM),
       readMetrics,
       false
-    ).toCompletionIterator
+    )
 
     // Create a key/value iterator for each stream
     val recordIter = dep match {
@@ -345,12 +345,12 @@ private class GlutenOptimizedWriterShuffleReader(
         columnarDep.serializer
           .newInstance()
           .asInstanceOf[ColumnarBatchSerializerInstance]
-          .deserializeStreams(wrappedStreams)
+          .deserializeStreams(wrappedStreams, wrappedStreams.cleanup)
           .asKeyValueIterator
       case _ =>
         val serializerInstance = dep.serializer.newInstance()
         // Create a key/value iterator for each stream
-        wrappedStreams.flatMap {
+        wrappedStreams.toCompletionIterator.flatMap {
           case (blockId, wrappedStream) =>
             // Note: the asKeyValueIterator below wraps a key/value iterator inside of a
             // NextIterator. The NextIterator makes sure that close() is called on the

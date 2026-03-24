@@ -649,7 +649,7 @@ JNIEXPORT jboolean JNICALL Java_org_apache_gluten_vectorized_ColumnarBatchOutIte
   if (outIter == nullptr) {
     throw GlutenException("Invalid iterator handle for addSplits");
   }
-  
+
   // Get the underlying split-aware iterator
   auto* splitAwareIter = dynamic_cast<gluten::SplitAwareColumnarBatchIterator*>(outIter->getInputIter());
   if (splitAwareIter == nullptr) {
@@ -1238,6 +1238,16 @@ JNIEXPORT void JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrapper
   env->CallVoidMethod(metrics, shuffleReaderMetricsSetDeserializeTime, reader->getDeserializeTime());
 
   checkException(env);
+  JNI_METHOD_END()
+}
+
+JNIEXPORT void JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrapper_stop( // NOLINT
+      JNIEnv* env,
+      jobject wrapper,
+      jlong shuffleReaderHandle) {
+  JNI_METHOD_START
+  auto reader = ObjectStore::retrieve<ShuffleReader>(shuffleReaderHandle);
+  reader->stop();
   JNI_METHOD_END()
 }
 

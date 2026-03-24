@@ -43,6 +43,8 @@ class ShuffleReader {
 
   virtual int64_t getDeserializeTime() const = 0;
 
+  virtual void stop() = 0;
+
   static ShuffleOutputType getOutputType(int32_t executionModeId) {
     switch (executionModeId) {
       case 0:
