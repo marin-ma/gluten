@@ -39,6 +39,7 @@
 #include "jni/JniFileSystem.h"
 #include "memory/GlutenBufferedInputBuilder.h"
 #include "operators/functions/SparkExprToSubfieldFilterParser.h"
+#include "operators/plannodes/RowVectorStream.h"
 #include "shuffle/ArrowShuffleDictionaryWriter.h"
 #include "udf/UdfLoader.h"
 #include "utils/Exception.h"
@@ -47,7 +48,6 @@
 #include "velox/connectors/hive/BufferedInputBuilder.h"
 #include "velox/connectors/hive/HiveConnector.h"
 #include "velox/connectors/hive/HiveDataSource.h"
-#include "operators/plannodes/RowVectorStream.h"
 #include "velox/connectors/hive/storage_adapters/abfs/RegisterAbfsFileSystem.h" // @manual
 #include "velox/connectors/hive/storage_adapters/gcs/RegisterGcsFileSystem.h" // @manual
 #include "velox/connectors/hive/storage_adapters/hdfs/HdfsFileSystem.h"
@@ -73,6 +73,17 @@ using namespace facebook;
 namespace gluten {
 
 namespace {
+
+bool hasCudaRuntimeAndDevice() {
+#ifdef GLUTEN_ENABLE_GPU
+  int count = 0;
+  cudaError_t err = cudaGetDeviceCount(&count);
+  return err == cudaSuccess && count > 0;
+#else
+  return false;
+#endif
+}
+
 MemoryManager* veloxMemoryManagerFactory(const std::string& kind, std::unique_ptr<AllocationListener> listener) {
   return new VeloxMemoryManager(kind, std::move(listener), *VeloxBackend::get()->getBackendConf());
 }
@@ -81,13 +92,20 @@ void veloxMemoryManagerReleaser(MemoryManager* memoryManager) {
   delete memoryManager;
 }
 
-Runtime* veloxRuntimeFactory(
-    const std::string& kind,
-    MemoryManager* memoryManager,
-    const std::unordered_map<std::string, std::string>& sessionConf) {
-  auto* vmm = dynamic_cast<VeloxMemoryManager*>(memoryManager);
-  GLUTEN_CHECK(vmm != nullptr, "Not a Velox memory manager");
-  return new VeloxRuntime(kind, vmm, sessionConf);
+Runtime::Factory createVeloxRuntimeFactory(std::unordered_map<std::string, std::string> immutableConf) {
+  return [immutableConf = std::move(immutableConf)](
+             const std::string& kind,
+             MemoryManager* memoryManager,
+             const std::unordered_map<std::string, std::string>& sessionConf) -> Runtime* {
+    auto* vmm = dynamic_cast<VeloxMemoryManager*>(memoryManager);
+    GLUTEN_CHECK(vmm != nullptr, "Not a Velox memory manager");
+
+    std::unordered_map<std::string, std::string> confMap(immutableConf);
+    // immutableConf takes precedence; sessionConf only fills missing keys.
+    confMap.insert(sessionConf.begin(), sessionConf.end());
+
+    return new VeloxRuntime(kind, vmm, confMap);
+  };
 }
 
 void veloxRuntimeReleaser(Runtime* runtime) {
@@ -105,7 +123,15 @@ void VeloxBackend::init(
 
   // Register factories.
   MemoryManager::registerFactory(kVeloxBackendKind, veloxMemoryManagerFactory, veloxMemoryManagerReleaser);
-  Runtime::registerFactory(kVeloxBackendKind, veloxRuntimeFactory, veloxRuntimeReleaser);
+
+  // Set immutable configurations from backend conf.
+  const bool enableCudf = backendConf_->get<bool>(kCudfEnabled, kCudfEnabledDefault) && hasCudaRuntimeAndDevice();
+  const bool enableCudfTableScan =
+      enableCudf && backendConf_->get<bool>(kCudfEnableTableScan, kCudfEnableTableScanDefault);
+  std::unordered_map<std::string, std::string> immutableConf = {
+      {kCudfEnabled, enableCudf ? "true" : "false"}, {kCudfEnableTableScan, enableCudfTableScan ? "true" : "false"}};
+  Runtime::registerFactory(
+      kVeloxBackendKind, createVeloxRuntimeFactory(std::move(immutableConf)), veloxRuntimeReleaser);
 
   if (backendConf_->get<bool>(kDebugModeEnabled, false)) {
     LOG(INFO) << "VeloxBackend config:" << printConfig(backendConf_->rawConfigs());
@@ -170,7 +196,7 @@ void VeloxBackend::init(
 #endif
 
 #ifdef GLUTEN_ENABLE_GPU
-  if (backendConf_->get<bool>(kCudfEnabled, kCudfEnabledDefault)) {
+  if (enableCudf) {
     std::unordered_map<std::string, std::string> options = {
         {velox::cudf_velox::CudfConfig::kCudfEnabled, "true"},
         {velox::cudf_velox::CudfConfig::kCudfDebugEnabled, backendConf_->get(kDebugCudf, kDebugCudfDefault)},
@@ -187,6 +213,12 @@ void VeloxBackend::init(
 
   initJolFilesystem();
   initConnector(hiveConf);
+
+#ifdef GLUTEN_ENABLE_GPU
+  if (enableCudfTableScan) {
+    initCudfConnector(hiveConf);
+  }
+#endif
 
   velox::dwio::common::registerFileSinks();
   velox::parquet::registerParquetReaderFactory();
@@ -317,17 +349,16 @@ void VeloxBackend::initConnector(const std::shared_ptr<velox::config::ConfigBase
   }
   velox::connector::registerConnector(
       std::make_shared<velox::connector::hive::HiveConnector>(kHiveConnectorId, hiveConf, ioExecutor_.get()));
-  
+
   // Register value-stream connector for runtime iterator-based inputs
   velox::connector::registerConnector(std::make_shared<ValueStreamConnector>(kIteratorConnectorId, hiveConf));
-  
+}
+
+void VeloxBackend::initCudfConnector(const std::shared_ptr<velox::config::ConfigBase>& hiveConf) {
 #ifdef GLUTEN_ENABLE_GPU
-  if (backendConf_->get<bool>(kCudfEnableTableScan, kCudfEnableTableScanDefault) &&
-      backendConf_->get<bool>(kCudfEnabled, kCudfEnabledDefault)) {
-    facebook::velox::cudf_velox::connector::hive::CudfHiveConnectorFactory factory;
-    auto hiveConnector = factory.newConnector(kCudfHiveConnectorId, hiveConf, ioExecutor_.get());
-    facebook::velox::connector::registerConnector(hiveConnector);
-  }
+  facebook::velox::cudf_velox::connector::hive::CudfHiveConnectorFactory factory;
+  auto hiveConnector = factory.newConnector(kCudfHiveConnectorId, hiveConf, ioExecutor_.get());
+  facebook::velox::connector::registerConnector(hiveConnector);
 #endif
 }
 
