@@ -72,7 +72,7 @@ class ColumnarShuffleReader[K, C](
 
   /** Read the combined key-values for this reduce task */
   override def read(): Iterator[Product2[K, C]] = {
-    val wrappedStreams = new GlutenShuffleBlockFetcherIterator(
+    val shuffleBlockFetcherIterator = new GlutenShuffleBlockFetcherIterator(
       context,
       blockManager.blockStoreClient,
       blockManager,
@@ -99,12 +99,12 @@ class ColumnarShuffleReader[K, C](
         columnarDep.serializer
           .newInstance()
           .asInstanceOf[ColumnarBatchSerializerInstance]
-          .deserializeStreams(wrappedStreams, wrappedStreams.cleanup, executionMode)
+          .deserializeStreams(shuffleBlockFetcherIterator, shuffleBlockFetcherIterator.cleanup, executionMode)
           .asKeyValueIterator
       case _ =>
         val serializerInstance = dep.serializer.newInstance()
         // Create a key/value iterator for each stream
-        wrappedStreams.toCompletionIterator.flatMap {
+        shuffleBlockFetcherIterator.toCompletionIterator.flatMap {
           case (blockId, wrappedStream) =>
             // Note: the asKeyValueIterator below wraps a key/value iterator inside of a
             // NextIterator. The NextIterator makes sure that close() is called on the
