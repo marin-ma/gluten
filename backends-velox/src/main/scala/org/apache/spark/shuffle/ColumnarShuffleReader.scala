@@ -99,7 +99,10 @@ class ColumnarShuffleReader[K, C](
         columnarDep.serializer
           .newInstance()
           .asInstanceOf[ColumnarBatchSerializerInstance]
-          .deserializeStreams(shuffleBlockFetcherIterator, shuffleBlockFetcherIterator.cleanup, executionMode)
+          .deserializeStreams(
+            shuffleBlockFetcherIterator,
+            shuffleBlockFetcherIterator.cleanup,
+            executionMode)
           .asKeyValueIterator
       case _ =>
         val serializerInstance = dep.serializer.newInstance()
