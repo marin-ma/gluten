@@ -1188,7 +1188,8 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
     jint batchSize,
     jlong readerBufferSize,
     jlong deserializerBufferSize,
-    jstring shuffleWriterType) {
+    jstring shuffleWriterType,
+    jint numReaderThreads) {
   JNI_METHOD_START
   auto ctx = getRuntime(env, wrapper);
 
@@ -1202,6 +1203,7 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
   options.deserializerBufferSize = deserializerBufferSize;
 
   options.shuffleWriterType = ShuffleWriter::stringToType(jStringToCString(env, shuffleWriterType));
+  options.numReaderThreads = numReaderThreads;
   std::shared_ptr<arrow::Schema> schema =
       arrowGetOrThrow(arrow::ImportSchema(reinterpret_cast<struct ArrowSchema*>(cSchema)));
 

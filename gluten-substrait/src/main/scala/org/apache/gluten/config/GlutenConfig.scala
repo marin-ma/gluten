@@ -233,6 +233,9 @@ class GlutenConfig(conf: SQLConf) extends GlutenCoreConfig(conf) {
   def columnarSortShuffleDeserializerBufferSize: Long =
     getConf(COLUMNAR_SORT_SHUFFLE_DESERIALIZER_BUFFER_SIZE)
 
+  def columnarShuffleReaderThreads: Int =
+    getConf(COLUMNAR_SHUFFLE_READER_THREADS)
+
   def columnarShuffleEnableDictionary: Boolean =
     getConf(SHUFFLE_ENABLE_DICTIONARY)
 
@@ -631,7 +634,8 @@ object GlutenConfig extends ConfigRegistry {
       SPARK_REDACTION_REGEX,
       SQLConf.LEGACY_TIME_PARSER_POLICY.key,
       SQLConf.LEGACY_STATISTICAL_AGGREGATE.key,
-      COLUMNAR_CUDF_ENABLED.key
+      COLUMNAR_CUDF_ENABLED.key,
+      COLUMNAR_SHUFFLE_READER_THREADS.key
     )
 
     nativeConfMap ++= conf.filter { case (k, _) => keys.contains(k) }
@@ -1063,6 +1067,12 @@ object GlutenConfig extends ConfigRegistry {
         "columnar batch.")
       .bytesConf(ByteUnit.BYTE)
       .createWithDefaultString("1MB")
+
+  val COLUMNAR_SHUFFLE_READER_THREADS =
+    buildConf("spark.gluten.sql.columnar.shuffle.numReaderThreads")
+      .doc("Number of threads used for reading shuffle data.")
+      .intConf
+      .createWithDefault(8)
 
   val SHUFFLE_ENABLE_DICTIONARY =
     buildConf("spark.gluten.sql.columnar.shuffle.dictionary.enabled")
