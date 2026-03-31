@@ -307,7 +307,7 @@ void runShuffle(
     GLUTEN_ASSIGN_OR_THROW(auto in, arrow::io::ReadableFile::Open(dataFile));
     auto streamReader = std::make_shared<TestStreamReader>(std::move(in));
     // Read all partitions.
-    auto iter = reader->read(streamReader, ShuffleOutputType::kRowVector);
+    auto iter = reader->read(streamReader, ShuffleOutputType::kRowVector, 0);
     while (iter->hasNext()) {
       // Read and discard.
       auto cb = iter->next();

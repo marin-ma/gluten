@@ -35,6 +35,7 @@ class ColumnarShuffleReader[K, C](
     context: TaskContext,
     readMetrics: ShuffleReadMetricsReporter,
     executionMode: StageExecutionMode,
+    readerOrder: Option[Int],
     serializerManager: SerializerManager = SparkEnv.get.serializerManager,
     blockManager: BlockManager = SparkEnv.get.blockManager,
     mapOutputTracker: MapOutputTracker = SparkEnv.get.mapOutputTracker,
@@ -72,6 +73,9 @@ class ColumnarShuffleReader[K, C](
 
   /** Read the combined key-values for this reduce task */
   override def read(): Iterator[Product2[K, C]] = {
+    logWarning(
+      s"Called shuffle read for shuffle id ${handle.shuffleId}," +
+        s" reader order: ${readerOrder.getOrElse(-1)}")
     val shuffleBlockFetcherIterator = new GlutenShuffleBlockFetcherIterator(
       context,
       blockManager.blockStoreClient,
@@ -102,7 +106,8 @@ class ColumnarShuffleReader[K, C](
           .deserializeStreams(
             shuffleBlockFetcherIterator,
             shuffleBlockFetcherIterator.cleanup,
-            executionMode)
+            executionMode,
+            readerOrder)
           .asKeyValueIterator
       case _ =>
         val serializerInstance = dep.serializer.newInstance()

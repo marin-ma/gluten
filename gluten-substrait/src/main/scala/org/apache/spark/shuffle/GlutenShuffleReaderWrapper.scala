@@ -28,4 +28,5 @@ case class GenShuffleReaderParameters[K, C](
     context: TaskContext,
     readMetrics: ShuffleReadMetricsReporter,
     shouldBatchFetch: Boolean,
-    executionMode: StageExecutionMode)
+    executionMode: StageExecutionMode,
+    readerOrder: Option[Int])

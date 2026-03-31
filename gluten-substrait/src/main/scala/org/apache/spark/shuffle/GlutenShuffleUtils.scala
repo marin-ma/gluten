@@ -161,7 +161,8 @@ object GlutenShuffleUtils {
       endPartition: Int,
       context: TaskContext,
       metrics: ShuffleReadMetricsReporter,
-      executionMode: StageExecutionMode): ShuffleReader[K, C] = {
+      executionMode: StageExecutionMode,
+      readerOrder: Option[Int]): ShuffleReader[K, C] = {
     val (blocksByAddress, canEnableBatchFetch) = {
       getReaderParam(handle, startMapIndex, endMapIndex, startPartition, endPartition)
     }
@@ -176,7 +177,8 @@ object GlutenShuffleUtils {
           context,
           metrics,
           shouldBatchFetch,
-          executionMode))
+          executionMode,
+          readerOrder))
       .shuffleReader
   }
 }

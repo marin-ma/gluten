@@ -34,6 +34,16 @@ class ReaderThreadPool {
  public:
   using Task = std::function<void()>;
 
+  struct PrioritizedTask {
+    Task task;
+    int32_t priority;
+
+    // 0 is the highest priority, larger value means lower priority.
+    bool operator<(const PrioritizedTask& other) const {
+      return priority > other.priority;
+    }
+  };
+
   /// Constructor
   /// @param numThreads Number of worker threads to create
   explicit ReaderThreadPool(size_t numThreads);
@@ -47,9 +57,11 @@ class ReaderThreadPool {
   ReaderThreadPool(ReaderThreadPool&&) = delete;
   ReaderThreadPool& operator=(ReaderThreadPool&&) = delete;
 
-  /// Submit a task to be executed by the thread pool
-  /// @param task The task function to execute
-  void submit(Task task);
+  void submitBatch(std::vector<Task> tasks, int32_t priority);
+
+  /// Start executing tasks from the queue
+  /// Call this after all priority-0 tasks have been submitted
+  void start();
 
   /// Stop accepting new tasks and signal all threads to finish and
   /// wait for all threads to complete their current tasks and join
@@ -71,10 +83,10 @@ class ReaderThreadPool {
 
   size_t numThreads_;
   std::vector<std::thread> workers_;
-  std::queue<Task> tasks_;
+  std::priority_queue<PrioritizedTask> tasks_;
 
-  std::mutex queueMutex_;
-  std::condition_variable condition_;
+  std::mutex taskQueueMtx_;
+  std::condition_variable wakeUpCV_;
   std::atomic<bool> stop_{false};
 };
 

@@ -122,7 +122,7 @@ case class ColumnarAQEShuffleReadExec private (
     } else {
       ""
     }
-    Iterator(desc)
+    Iterator(desc) ++ Iterator(s"[order=${_readerOrder}]")
   }
 
   /** Returns true iff some partitions were actually combined */
@@ -264,7 +264,7 @@ case class ColumnarAQEShuffleReadExec private (
         sendDriverMetrics()
         stage.shuffle match {
           case columnarShuffle: ColumnarShuffleExchangeExec =>
-            columnarShuffle.getShuffleRDD(partitionSpecs.toArray, executionMode)
+            columnarShuffle.getShuffleRDD(partitionSpecs.toArray, executionMode, _readerOrder)
           case _ =>
             stage.shuffle.getShuffleRDD(partitionSpecs.toArray)
         }
@@ -278,9 +278,16 @@ case class ColumnarAQEShuffleReadExec private (
   }
 
   override protected def doExecuteColumnar(): RDD[ColumnarBatch] = {
+    logWarning(s"doExecuteColumnar called. Reader order is: ${_readerOrder}")
     shuffleRDD.asInstanceOf[RDD[ColumnarBatch]]
   }
 
   override protected def withNewChildInternal(newChild: SparkPlan): ColumnarAQEShuffleReadExec =
     copy(child = newChild)
+
+  private var _readerOrder: Int = -1
+
+  def setReaderOrder(readerOrder: Int): Unit = {
+    _readerOrder = readerOrder
+  }
 }

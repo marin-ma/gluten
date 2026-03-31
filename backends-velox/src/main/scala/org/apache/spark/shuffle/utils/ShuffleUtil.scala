@@ -40,6 +40,7 @@ object ShuffleUtil {
         parameters.context,
         parameters.readMetrics,
         parameters.executionMode,
+        parameters.readerOrder,
         serializerManager = ColumnarShuffleManager.bypassDecompressionSerializerManger,
         shouldBatchFetch = parameters.shouldBatchFetch
       )

@@ -33,15 +33,19 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.softaffinity.SoftAffinity
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, SortOrder}
+import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.execution._
+import org.apache.spark.sql.execution.adaptive.ColumnarAQEShuffleReadExec
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.utils.SparkInputMetricsUtil.InputMetricsWrapper
 import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import com.google.common.collect.Lists
 import org.apache.hadoop.fs.viewfs.ViewFileSystemUtils
+
+import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -173,6 +177,37 @@ case class WholeStageTransformer(child: SparkPlan, materializeInput: Boolean = f
   private var wholeStageTransformerContext: Option[WholeStageTransformContext] = None
 
   private var outputSchemaForPlan: Option[TypeNode] = None
+
+  private val nextReaderOrder = new AtomicInteger(0)
+
+  private def setShuffleReaderOrder(plan: SparkPlan): Unit = {
+    plan match {
+      case bhj: BroadcastHashJoinExecTransformerBase =>
+        bhj.joinBuildSide match {
+          case BuildLeft =>
+            setShuffleReaderOrder(bhj.right)
+          case BuildRight =>
+            setShuffleReaderOrder(bhj.left)
+        }
+
+      case shj: ShuffledHashJoinExecTransformerBase =>
+        shj.joinBuildSide match {
+          case BuildLeft =>
+            setShuffleReaderOrder(shj.left)
+            setShuffleReaderOrder(shj.right)
+          case BuildRight =>
+            setShuffleReaderOrder(shj.right)
+            setShuffleReaderOrder(shj.left)
+        }
+
+      case c @ ColumnarAQEShuffleReadExec(_, _, _, _) =>
+        val order = nextReaderOrder.getAndIncrement()
+        c.setReaderOrder(order)
+
+      case other =>
+        other.children.foreach(setShuffleReaderOrder)
+    }
+  }
 
   private def inferSchemaFromAttributes(attrs: Seq[Attribute]): TypeNode = {
     val outputTypeNodeList = new java.util.ArrayList[TypeNode]()
@@ -369,6 +404,8 @@ case class WholeStageTransformer(child: SparkPlan, materializeInput: Boolean = f
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
     assert(child.isInstanceOf[TransformSupport])
     val pipelineTime: SQLMetric = longMetric("pipelineTime")
+
+    setShuffleReaderOrder(child)
     // We should do transform first to make sure all subqueries are materialized
     val wsCtx = GlutenTimeMetric.withMillisTime {
       doWholeStageTransform()

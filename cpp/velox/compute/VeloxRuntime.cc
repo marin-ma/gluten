@@ -342,8 +342,7 @@ std::shared_ptr<ShuffleReader> VeloxRuntime::createShuffleReader(
       options.readerBufferSize,
       options.deserializerBufferSize,
       memoryManager(),
-      options.shuffleWriterType,
-      options.numReaderThreads);
+      options.shuffleWriterType);
 }
 
 std::unique_ptr<ColumnarBatchSerializer> VeloxRuntime::createColumnarBatchSerializer(struct ArrowSchema* cSchema) {

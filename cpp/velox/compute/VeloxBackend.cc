@@ -265,10 +265,17 @@ void VeloxBackend::init(
   registerShuffleDictionaryWriterFactory([](MemoryManager* memoryManager, arrow::util::Codec* codec) {
     return std::make_unique<ArrowShuffleDictionaryWriter>(memoryManager, codec);
   });
+
+  readerThreadPool_ = std::make_unique<ReaderThreadPool>(
+      backendConf_->get<int32_t>(kShuffleReaderThreads, std::thread::hardware_concurrency()));
 }
 
 facebook::velox::cache::AsyncDataCache* VeloxBackend::getAsyncDataCache() const {
   return asyncDataCache_.get();
+}
+
+ReaderThreadPool* VeloxBackend::getReaderThreadPool() const {
+  return readerThreadPool_.get();
 }
 
 // JNI-or-local filesystem, for spilling-to-heap if we have extra JVM heap spaces

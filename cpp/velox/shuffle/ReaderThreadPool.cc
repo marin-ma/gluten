@@ -15,7 +15,8 @@
  * limitations under the License.
  */
 
-#include "ReaderThreadPool.h"
+#include "shuffle/ReaderThreadPool.h"
+#include <glog/logging.h>
 
 namespace gluten {
 
@@ -24,27 +25,33 @@ ReaderThreadPool::ReaderThreadPool(size_t numThreads) : numThreads_(numThreads) 
   for (size_t i = 0; i < numThreads; ++i) {
     workers_.emplace_back([this]() { workerThread(); });
   }
+  LOG(WARNING) << "Created ReaderThreadPool with " << numThreads << " threads.";
 }
 
 ReaderThreadPool::~ReaderThreadPool() {
   shutdown();
 }
 
-void ReaderThreadPool::submit(Task task) {
-  {
-    std::lock_guard<std::mutex> lock(queueMutex_);
-    if (stop_.load(std::memory_order_acquire)) {
-      return; // Don't accept new tasks after shutdown
-    }
-    tasks_.push(std::move(task));
+void ReaderThreadPool::submitBatch(std::vector<Task> tasks, int32_t priority) {
+  std::lock_guard<std::mutex> lock(taskQueueMtx_);
+  if (stop_.load(std::memory_order_acquire)) {
+    return;
   }
-  condition_.notify_one();
+  for (auto& task : tasks) {
+    tasks_.push({std::move(task), priority});
+  }
+}
+
+void ReaderThreadPool::start() {
+  // Wake up all worker threads to start processing.
+  wakeUpCV_.notify_all();
+  LOG(WARNING) << "Started ReaderThreadPool execution.";
 }
 
 void ReaderThreadPool::shutdown() {
   if (!isShutdown()) {
     stop_.store(true, std::memory_order_release);
-    condition_.notify_all();
+    wakeUpCV_.notify_all();
 
     // Wait for all worker threads to finish their current tasks and join.
     for (auto& worker : workers_) {
@@ -57,22 +64,34 @@ void ReaderThreadPool::shutdown() {
 
 void ReaderThreadPool::workerThread() {
   while (true) {
-    Task task;
     {
-      std::unique_lock<std::mutex> lock(queueMutex_);
-      condition_.wait(lock, [this]() { return stop_.load(std::memory_order_acquire) || !tasks_.empty(); });
+      std::unique_lock<std::mutex> lock(taskQueueMtx_);
+
+      wakeUpCV_.wait(lock, [this]() { return stop_.load(std::memory_order_acquire) || !tasks_.empty(); });
 
       if (stop_.load(std::memory_order_acquire)) {
         // Discard remaining tasks and exit the thread.
         return;
       }
-
-      task = std::move(tasks_.front());
-      tasks_.pop();
     }
 
-    if (task) {
-      task();
+    while (true) {
+      Task task;
+      {
+        std::lock_guard<std::mutex> lock(taskQueueMtx_);
+        if (tasks_.empty()) {
+          break;
+        }
+        auto& prioritizedTask = tasks_.top();
+        LOG(WARNING) << "Worker thread " << std::this_thread::get_id() << " is executing a task with priority "
+                     << prioritizedTask.priority;
+        task = std::move(prioritizedTask.task);
+        tasks_.pop();
+      }
+
+      if (task) {
+        task();
+      }
     }
   }
 }

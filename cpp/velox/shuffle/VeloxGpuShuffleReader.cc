@@ -70,21 +70,59 @@ VeloxGpuHashShuffleReaderDeserializer::VeloxGpuHashShuffleReaderDeserializer(
       decompressTime_(decompressTime) {}
 
 VeloxGpuHashShuffleReaderDeserializer::~VeloxGpuHashShuffleReaderDeserializer() {
+  // Wait for all reader threads to complete before destroying
+  if (!isStopped()) {
+    stop();
+  }
+
   decompressTime_ += decompressTimeCounter_.load(std::memory_order_relaxed);
   deserializeTime_ += deserializeTimeCounter_.load(std::memory_order_relaxed);
+}
+
+std::unique_ptr<ColumnarBatchIterator> VeloxGpuHashShuffleReaderDeserializer::deserializeStreams(int32_t priority) {
+  batchQueue_ = std::make_unique<CachedBatchQueue<GpuBufferColumnarBatch>>(1L << 30);
+
+  if (!threadPool_) {
+    throw GlutenException("Thread pool must be provided to VeloxGpuHashShuffleReaderDeserializer");
+  }
+
+  const size_t numThreads = threadPool_->getNumThreads();
+  activeReaders_.store(numThreads);
+
+  // Submit reader tasks to the thread pool.
+  std::vector<ReaderThreadPool::Task> tasks;
+  tasks.reserve(numThreads);
+  for (size_t i = 0; i < numThreads; ++i) {
+    tasks.emplace_back([this]() { read(); });
+  }
+  threadPool_->submitBatch(std::move(tasks), priority);
+
+  if (priority == 0) {
+    threadPool_->start();
+  }
+
+  return std::make_unique<AsyncShuffleReaderIterator<GpuBufferColumnarBatch>>(batchQueue_.get());
+}
+
+void VeloxGpuHashShuffleReaderDeserializer::stop() {
+  // Signal threads to stop if not already stopped.
+  stop_.store(true, std::memory_order_release);
+  // Wait for all reader threads to complete.
+  std::unique_lock<std::mutex> lock(completionMtx_);
+  completionCV_.wait(lock, [this] { return activeReaders_.load(std::memory_order_acquire) == 0; });
 }
 
 void VeloxGpuHashShuffleReaderDeserializer::read() {
   std::shared_ptr<arrow::io::InputStream> inputStream = nullptr;
 
   while (true) {
-    // Check if shutdown has been requested
-    if (threadPool_ && threadPool_->isShutdown()) {
+    // Check if stop has been called
+    if (stop_.load(std::memory_order_acquire)) {
       break;
     }
 
     if (inputStream == nullptr) {
-      std::lock_guard<std::mutex> lockGuard(mtx_);
+      std::lock_guard<std::mutex> lockGuard(readStreamMtx_);
       auto rawStream = streamReader_->readNextStream(memoryManager_->defaultArrowMemoryPool());
       if (rawStream == nullptr) {
         // No more streams available.
@@ -141,30 +179,12 @@ void VeloxGpuHashShuffleReaderDeserializer::read() {
   // Decrement active reader count.
   if (activeReaders_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
     batchQueue_->noMoreBatches();
+    completionCV_.notify_all();
   }
 }
 
-std::shared_ptr<ColumnarBatch> VeloxGpuHashShuffleReaderDeserializer::next() {
-  if (!readerStarted_) {
-    batchQueue_ = std::make_unique<CachedBatchQueue<GpuBufferColumnarBatch>>(1L << 30);
-
-    if (!threadPool_) {
-      throw GlutenException("Thread pool must be provided to VeloxGpuHashShuffleReaderDeserializer");
-    }
-
-    const size_t numThreads = threadPool_->getNumThreads();
-    activeReaders_.store(numThreads);
-    LOG(WARNING) << "Using " << numThreads << " threads for deserialization";
-
-    // Submit reader tasks to the thread pool
-    for (size_t i = 0; i < numThreads; ++i) {
-      threadPool_->submit([this]() { read(); });
-    }
-
-    readerStarted_ = true;
-  }
-
-  return batchQueue_->get();
+bool VeloxGpuHashShuffleReaderDeserializer::isStopped() const {
+  return stop_.load(std::memory_order_acquire);
 }
 
 } // namespace gluten

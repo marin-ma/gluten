@@ -29,6 +29,7 @@
 #include "velox/common/memory/MmapAllocator.h"
 
 #include "memory/VeloxMemoryManager.h"
+#include "shuffle/ReaderThreadPool.h"
 
 namespace gluten {
 
@@ -47,6 +48,8 @@ class VeloxBackend {
   static VeloxBackend* get();
 
   facebook::velox::cache::AsyncDataCache* getAsyncDataCache() const;
+
+  ReaderThreadPool* getReaderThreadPool() const;
 
   std::shared_ptr<facebook::velox::config::ConfigBase> getBackendConf() const {
     return backendConf_;
@@ -93,6 +96,8 @@ class VeloxBackend {
   std::string cacheFilePrefix_;
 
   std::shared_ptr<facebook::velox::config::ConfigBase> backendConf_;
+
+  std::unique_ptr<ReaderThreadPool> readerThreadPool_;
 };
 
 } // namespace gluten

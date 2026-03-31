@@ -19,9 +19,9 @@
 
 #include "memory/GpuBufferColumnarBatch.h"
 #include "memory/VeloxMemoryManager.h"
-#include "shuffle/Payload.h"
 #include "shuffle/ReaderThreadPool.h"
 #include "shuffle/ShuffleReader.h"
+#include "shuffle/VeloxShuffleReader.h"
 #include "utils/CachedBatchQueue.h"
 
 #include "velox/type/Type.h"
@@ -34,7 +34,7 @@ namespace gluten {
 
 /// Convert the buffers to cudf table.
 /// Multi-threaded deserializer that uses producer threads to pre-fetch and deserialize batches.
-class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator {
+class VeloxGpuHashShuffleReaderDeserializer final : public ShuffleReaderDeserializer {
  public:
   VeloxGpuHashShuffleReaderDeserializer(
       const std::shared_ptr<StreamReader>& streamReader,
@@ -49,11 +49,15 @@ class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator
 
   ~VeloxGpuHashShuffleReaderDeserializer() override;
 
-  std::shared_ptr<ColumnarBatch> next() override;
+  std::unique_ptr<ColumnarBatchIterator> deserializeStreams(int32_t priority) override;
+
+  void stop() override;
 
  private:
   // Reader thread function that deserializes batches.
   void read();
+
+  bool isStopped() const;
 
   std::shared_ptr<StreamReader> streamReader_;
   std::shared_ptr<arrow::Schema> schema_;
@@ -69,11 +73,14 @@ class VeloxGpuHashShuffleReaderDeserializer final : public ColumnarBatchIterator
   std::atomic<int64_t> deserializeTimeCounter_{0};
   std::atomic<int64_t> decompressTimeCounter_{0};
 
-  bool readerStarted_{false};
-
   std::unique_ptr<CachedBatchQueue<GpuBufferColumnarBatch>> batchQueue_;
   std::atomic<int> activeReaders_{0};
 
-  std::mutex mtx_;
+  std::mutex readStreamMtx_;
+
+  std::atomic<bool> stop_{false};
+
+  std::mutex completionMtx_;
+  std::condition_variable completionCV_;
 };
 } // namespace gluten

@@ -105,7 +105,6 @@ private class ColumnarBatchSerializerInstanceImpl(
     val batchSize = GlutenConfig.get.maxBatchSize
     val readerBufferSize = GlutenConfig.get.columnarShuffleReaderBufferSize
     val deserializerBufferSize = GlutenConfig.get.columnarSortShuffleDeserializerBufferSize
-    val numReaderThreads = GlutenConfig.get.columnarShuffleReaderThreads
     val shuffleReaderHandle = jniWrapper.make(
       cSchema.memoryAddress(),
       compressionCodec,
@@ -113,8 +112,7 @@ private class ColumnarBatchSerializerInstanceImpl(
       batchSize,
       readerBufferSize,
       deserializerBufferSize,
-      shuffleWriterType.name,
-      numReaderThreads
+      shuffleWriterType.name
     )
     // Close shuffle reader instance as lately as the end of task processing,
     // since the native reader could hold a reference to memory pool that
@@ -137,20 +135,22 @@ private class ColumnarBatchSerializerInstanceImpl(
 
   // TODO: remove this method for columnar shuffle.
   override def deserializeStream(in: InputStream): DeserializationStream = {
-    new TaskDeserializationStream(Iterator((null, in)), None)
+    new TaskDeserializationStream(Iterator((null, in)))
   }
 
   override def deserializeStreams(
       streams: Iterator[(BlockId, InputStream)],
       completionFunction: () => Unit,
-      executionMode: StageExecutionMode): DeserializationStream = {
-    new TaskDeserializationStream(streams, Some(completionFunction), executionMode)
+      executionMode: StageExecutionMode,
+      readerOrder: Option[Int]): DeserializationStream = {
+    new TaskDeserializationStream(streams, Some(completionFunction), executionMode, readerOrder)
   }
 
   private class TaskDeserializationStream(
       streams: Iterator[(BlockId, InputStream)],
-      completionFunction: Option[() => Unit],
-      executionMode: StageExecutionMode = CPUStageMode)
+      completionFunction: Option[() => Unit] = None,
+      executionMode: StageExecutionMode = CPUStageMode,
+      var readerOrder: Option[Int] = None)
     extends DeserializationStream
     with TaskResource {
     private val streamReader = ShuffleStreamReader(streams)
@@ -158,7 +158,7 @@ private class ColumnarBatchSerializerInstanceImpl(
     private val wrappedOut: ClosableIterator[ColumnarBatch] = new ColumnarBatchOutIterator(
       runtime,
       jniWrapper
-        .read(shuffleReaderHandle, streamReader, executionMode.id))
+        .read(shuffleReaderHandle, streamReader, executionMode.id, readerOrder.getOrElse(0)))
 
     private var cb: ColumnarBatch = _
 
@@ -188,6 +188,10 @@ private class ColumnarBatchSerializerInstanceImpl(
 
     @throws(classOf[EOFException])
     override def readValue[T: ClassTag](): T = {
+      if (readerOrder.isDefined) {
+        logWarning(s"Start reading reader order: ${readerOrder.get}")
+        readerOrder = None
+      }
       if (cb != null) {
         cb.close()
         cb = null

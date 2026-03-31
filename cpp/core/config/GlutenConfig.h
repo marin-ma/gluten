@@ -99,6 +99,8 @@ constexpr bool kCudfEnabledDefault = false;
 const std::string kDebugCudf = "spark.gluten.sql.debug.cudf";
 const std::string kDebugCudfDefault = "false";
 
+const std::string kShuffleReaderThreads = "spark.gluten.sql.columnar.shuffle.numReaderThreads";
+
 std::unordered_map<std::string, std::string>
 parseConfMap(JNIEnv* env, const uint8_t* planData, const int32_t planDataLength);
 

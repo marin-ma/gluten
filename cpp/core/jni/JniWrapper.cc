@@ -1188,8 +1188,7 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
     jint batchSize,
     jlong readerBufferSize,
     jlong deserializerBufferSize,
-    jstring shuffleWriterType,
-    jint numReaderThreads) {
+    jstring shuffleWriterType) {
   JNI_METHOD_START
   auto ctx = getRuntime(env, wrapper);
 
@@ -1203,7 +1202,6 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
   options.deserializerBufferSize = deserializerBufferSize;
 
   options.shuffleWriterType = ShuffleWriter::stringToType(jStringToCString(env, shuffleWriterType));
-  options.numReaderThreads = numReaderThreads;
   std::shared_ptr<arrow::Schema> schema =
       arrowGetOrThrow(arrow::ImportSchema(reinterpret_cast<struct ArrowSchema*>(cSchema)));
 
@@ -1216,7 +1214,8 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
     jobject wrapper,
     jlong shuffleReaderHandle,
     jobject jStreamReader,
-    jint executionMode) {
+    jint executionMode,
+    jint readerOrder) {
   JNI_METHOD_START
   auto ctx = getRuntime(env, wrapper);
   auto reader = ObjectStore::retrieve<ShuffleReader>(shuffleReaderHandle);
@@ -1224,7 +1223,7 @@ JNIEXPORT jlong JNICALL Java_org_apache_gluten_vectorized_ShuffleReaderJniWrappe
   auto streamReader = std::make_shared<ShuffleStreamReader>(env, jStreamReader);
 
   ShuffleOutputType requiredOutputType = ShuffleReader::getOutputType(executionMode);
-  auto outItr = reader->read(streamReader, requiredOutputType);
+  auto outItr = reader->read(streamReader, requiredOutputType, readerOrder);
   return ctx->saveObject(outItr);
   JNI_METHOD_END(kInvalidObjectHandle)
 }

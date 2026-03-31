@@ -308,10 +308,9 @@ class VeloxShuffleWriterTest : public ::testing::TestWithParam<ShuffleTestParams
         kDefaultReadBufferSize,
         GetParam().deserializerBufferSize,
         getDefaultMemoryManager(),
-        GetParam().shuffleWriterType,
-        2);
+        GetParam().shuffleWriterType);
 
-    const auto iter = reader->read(std::make_shared<TestStreamReader>(std::move(in)), ShuffleOutputType::kRowVector);
+    const auto iter = reader->read(std::make_shared<TestStreamReader>(std::move(in)), ShuffleOutputType::kRowVector, 0);
     while (iter->hasNext()) {
       auto vector = std::dynamic_pointer_cast<VeloxColumnarBatch>(iter->next())->getRowVector();
       vectors.emplace_back(vector);

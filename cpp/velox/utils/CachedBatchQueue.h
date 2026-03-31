@@ -61,7 +61,7 @@ class CachedBatchQueue {
   }
 
   void noMoreBatches() {
-    std::unique_lock<std::mutex> lock(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     noMoreBatches_ = true;
     notFull_.notify_all();
     notEmpty_.notify_all();
