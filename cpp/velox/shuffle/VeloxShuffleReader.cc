@@ -946,17 +946,18 @@ void VeloxShuffleReader::createDeserializer(
 #else
         throw GlutenException("GLUTEN_ENABLE_GPU is not set. GPU shuffle reader deserializer is not supported.");
 #endif
+      } else {
+        deserializer_ = std::make_unique<VeloxHashShuffleReaderDeserializer>(
+            streamReader,
+            schema_,
+            codec_,
+            rowType_,
+            readerBufferSize_,
+            memoryManager_,
+            VeloxBackend::get()->getReaderThreadPool(),
+            deserializeTime_,
+            decompressTime_);
       }
-      deserializer_ = std::make_unique<VeloxHashShuffleReaderDeserializer>(
-          streamReader,
-          schema_,
-          codec_,
-          rowType_,
-          readerBufferSize_,
-          memoryManager_,
-          VeloxBackend::get()->getReaderThreadPool(),
-          deserializeTime_,
-          decompressTime_);
     } break;
     case ShuffleWriterType::kSortShuffle:
       GLUTEN_CHECK(
