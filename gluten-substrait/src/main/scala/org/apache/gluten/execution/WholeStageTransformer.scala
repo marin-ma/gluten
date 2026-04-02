@@ -37,7 +37,8 @@ import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.execution._
-import org.apache.spark.sql.execution.adaptive.ColumnarAQEShuffleReadExec
+import org.apache.spark.sql.execution.adaptive.{ColumnarAQEShuffleReadExec, ShuffleQueryStageExec}
+import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeLike}
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.utils.SparkInputMetricsUtil.InputMetricsWrapper
 import org.apache.spark.sql.vectorized.ColumnarBatch
@@ -180,6 +181,41 @@ case class WholeStageTransformer(child: SparkPlan, materializeInput: Boolean = f
 
   private val nextReaderOrder = new AtomicInteger(0)
 
+  private val shuffleReaders = mutable.ArrayBuffer.empty[ColumnarAQEShuffleReadExec]
+
+  private def collectShuffleReaders(plan: SparkPlan): Unit = {
+    plan match {
+      case bhj: BroadcastHashJoinExecTransformerBase =>
+        bhj.joinBuildSide match {
+          case BuildLeft =>
+            collectShuffleReaders(bhj.right)
+          case BuildRight =>
+            collectShuffleReaders(bhj.left)
+        }
+
+      case shj: ShuffledHashJoinExecTransformerBase =>
+        shj.joinBuildSide match {
+          case BuildLeft =>
+            collectShuffleReaders(shj.left)
+            collectShuffleReaders(shj.right)
+          case BuildRight =>
+            collectShuffleReaders(shj.right)
+            collectShuffleReaders(shj.left)
+        }
+
+      case c @ ColumnarAQEShuffleReadExec(_, _, _, _) =>
+        shuffleReaders += c
+
+      case other =>
+        other.children.foreach(collectShuffleReaders)
+    }
+  }
+
+  private def setShuffleReaderOrderHardCoded() = {
+    val indices = Seq(3, 1, 0, 4, 2, 5)
+    indices.zipWithIndex.foreach { case (i, order) => shuffleReaders(i).setReaderOrder(order) }
+  }
+
   private def setShuffleReaderOrder(plan: SparkPlan): Unit = {
     plan match {
       case bhj: BroadcastHashJoinExecTransformerBase =>
@@ -203,6 +239,15 @@ case class WholeStageTransformer(child: SparkPlan, materializeInput: Boolean = f
       case c @ ColumnarAQEShuffleReadExec(_, _, _, _) =>
         val order = nextReaderOrder.getAndIncrement()
         c.setReaderOrder(order)
+        val args = c.child match {
+          case ShuffleQueryStageExec(_, s: ShuffleExchangeLike, _) =>
+            s.toString() + " (" + order + ")"
+          case ShuffleQueryStageExec(_, r @ ReusedExchangeExec(_, s: ShuffleExchangeLike), _) =>
+            s.toString() + " (" + order + ")"
+          case _ =>
+            ""
+        }
+        logWarning("set shuffle reader order to " + order + " for " + args)
 
       case other =>
         other.children.foreach(setShuffleReaderOrder)
@@ -406,6 +451,11 @@ case class WholeStageTransformer(child: SparkPlan, materializeInput: Boolean = f
     val pipelineTime: SQLMetric = longMetric("pipelineTime")
 
     setShuffleReaderOrder(child)
+
+    collectShuffleReaders(child)
+    if (shuffleReaders.size == 6) {
+      setShuffleReaderOrderHardCoded()
+    }
     // We should do transform first to make sure all subqueries are materialized
     val wsCtx = GlutenTimeMetric.withMillisTime {
       doWholeStageTransform()
