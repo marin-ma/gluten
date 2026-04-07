@@ -79,6 +79,14 @@ case class GlutenAutoAdjustStageResourceProfile(glutenConf: GlutenConfig, spark:
     val taskResource = mutable.Map.empty[String, TaskResourceRequest] ++= defaultRP.taskResources
     val executorResource =
       mutable.Map.empty[String, ExecutorResourceRequest] ++= defaultRP.executorResources
+
+    glutenConf.gpuStageTasks.foreach {
+      task =>
+        val newExecutorCores =
+          new ExecutorResourceRequest(ResourceProfile.CORES, task.toLong)
+        executorResource.put(ResourceProfile.CORES, newExecutorCores)
+    }
+
     val memoryRequest = executorResource.get(ResourceProfile.MEMORY)
     val offheapRequest = executorResource.get(ResourceProfile.OFFHEAP_MEM)
     logInfo(s"default memory request $memoryRequest")

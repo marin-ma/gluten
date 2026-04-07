@@ -713,4 +713,10 @@ object VeloxConfig extends ConfigRegistry {
       .doc("Maps table field names to file field names using names, not indices for Parquet files.")
       .booleanConf
       .createWithDefault(true)
+
+  val CUDF_CONCURRENT_GPU_TASKS =
+    buildConf("spark.gluten.sql.columnar.backend.velox.cudf.concurrentGpuTasks")
+      .doc("The number of concurrent GPU tasks to run.")
+      .intConf
+      .createWithDefault(1)
 }

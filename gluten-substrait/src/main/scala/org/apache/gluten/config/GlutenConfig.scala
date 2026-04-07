@@ -372,6 +372,8 @@ class GlutenConfig(conf: SQLConf) extends GlutenCoreConfig(conf) {
   def autoAdjustStageExecutionMode: Boolean =
     getConf(AUTO_ADJUST_STAGE_EXECUTION_MODE)
 
+  def gpuStageTasks: Option[Int] = getConf(GPU_STAGE_TASKS)
+
   def parquetMetadataValidationEnabled: Boolean = {
     getConf(PARQUET_UNEXPECTED_METADATA_FALLBACK_ENABLED)
   }
@@ -1554,6 +1556,13 @@ object GlutenConfig extends ConfigRegistry {
       .doc("Experimental: Auto adjust execution mode according to the stage execution plan.")
       .booleanConf
       .createWithDefault(false)
+
+  val GPU_STAGE_TASKS =
+    buildConf("spark.gluten.gpu.tasks")
+      .experimental()
+      .doc("Experimental: Number of CPU tasks in GPU stage.")
+      .intConf
+      .createOptional
 
   val PARQUET_UNEXPECTED_METADATA_FALLBACK_ENABLED =
     buildConf("spark.gluten.sql.fallbackUnexpectedMetadataParquet")

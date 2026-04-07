@@ -91,5 +91,3 @@ class ReaderThreadPool {
 };
 
 } // namespace gluten
-
-// Made with Bob

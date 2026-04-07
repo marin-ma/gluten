@@ -97,5 +97,3 @@ void ReaderThreadPool::workerThread() {
 }
 
 } // namespace gluten
-
-// Made with Bob
