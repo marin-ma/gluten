@@ -70,7 +70,7 @@ struct DispatchColumn {
     auto values = buffers[bufferIdx++];
 
     // === Step 2: allocate GPU device buffers and copy ===
-    rmm::device_buffer dataBuf(values->size(), stream);
+    rmm::device_buffer dataBuf(values->size(), stream, mr);
     CUDF_CUDA_TRY(
         cudaMemcpyAsync(dataBuf.data(), values->data(), values->size(), cudaMemcpyHostToDevice, stream.value()));
 
