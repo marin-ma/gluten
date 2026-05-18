@@ -26,6 +26,8 @@ import org.apache.gluten.extension.JoinKeysTag
 import org.apache.gluten.extension.columnar.FallbackTags
 import org.apache.gluten.shuffle.NeedCustomColumnarBatchSerializer
 import org.apache.gluten.sql.shims.SparkShimLoader
+import org.apache.gluten.substrait.SubstraitContext
+import org.apache.gluten.substrait.expression.{ExpressionBuilder, ExpressionNode, WindowFunctionNode}
 import org.apache.gluten.vectorized.{ColumnarBatchSerializer, ColumnarBatchSerializeResult}
 
 import org.apache.spark.{ShuffleDependency, SparkEnv, SparkException}
@@ -53,7 +55,7 @@ import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.execution.python.ArrowEvalPythonExec
 import org.apache.spark.sql.execution.unsafe.UnsafeColumnarBuildSideRelation
 import org.apache.spark.sql.execution.utils.ExecUtil
-import org.apache.spark.sql.expression.{UDFExpression, UserDefinedAggregateFunction}
+import org.apache.spark.sql.expression.{UDFExpression, UDFResolver, UserDefinedAggregateFunction, UserDefinedWindowFunction}
 import org.apache.spark.sql.hive.VeloxHiveUDFTransformer
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
@@ -64,7 +66,7 @@ import org.apache.commons.lang3.ClassUtils
 
 import javax.ws.rs.core.UriBuilder
 
-import java.util.Locale
+import java.util.{ArrayList => JArrayList, List => JList, Locale}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -1123,6 +1125,7 @@ class VeloxSparkPlanExecApi extends SparkPlanExecApi with Logging {
       Sig[HLLAdapter](ExpressionNames.APPROX_DISTINCT),
       Sig[UDFExpression](ExpressionNames.UDF_PLACEHOLDER),
       Sig[UserDefinedAggregateFunction](ExpressionNames.UDAF_PLACEHOLDER),
+      Sig[UserDefinedWindowFunction](ExpressionNames.UDWF_PLACEHOLDER),
       Sig[NaNvl](ExpressionNames.NANVL),
       Sig[VeloxCollectList](ExpressionNames.COLLECT_LIST),
       Sig[CollectList](ExpressionNames.COLLECT_LIST),
@@ -1264,6 +1267,160 @@ class VeloxSparkPlanExecApi extends SparkPlanExecApi with Logging {
         GlutenExceptionUtil.throwsNotFullySupported(
           ExpressionNames.RAISE_ERROR,
           RaiseErrorRestrictions.ONLY_SUPPORT_ERROR_MESSAGE)
+    }
+  }
+
+  /** Override to add support for user-defined window functions (UDWF) */
+  override def genWindowFunctionsNode(
+      windowExpression: Seq[NamedExpression],
+      windowExpressionNodes: JList[WindowFunctionNode],
+      originalInputAttributes: Seq[Attribute],
+      context: SubstraitContext): Unit = {
+    windowExpression.map {
+      windowExpr =>
+        val aliasExpr = windowExpr.asInstanceOf[Alias]
+        val columnName = s"${aliasExpr.name}_${aliasExpr.exprId.id}"
+        val wExpression = aliasExpr.child.asInstanceOf[WindowExpression]
+        wExpression.windowFunction match {
+          case wf @ (RowNumber() | Rank(_) | DenseRank(_) | CumeDist() | PercentRank(_)) =>
+            val aggWindowFunc = wf.asInstanceOf[AggregateWindowFunction]
+            val frame = aggWindowFunc.frame.asInstanceOf[SpecifiedWindowFrame]
+            val windowFunctionNode = ExpressionBuilder.makeWindowFunction(
+              WindowFunctionsBuilder.create(context, aggWindowFunc).toInt,
+              new JArrayList[ExpressionNode](),
+              columnName,
+              ConverterUtils.getTypeNode(aggWindowFunc.dataType, aggWindowFunc.nullable),
+              frame.upper,
+              frame.lower,
+              frame.frameType.sql,
+              originalInputAttributes.asJava
+            )
+            windowExpressionNodes.add(windowFunctionNode)
+          case aggExpression: AggregateExpression =>
+            val frame = wExpression.windowSpec.frameSpecification.asInstanceOf[SpecifiedWindowFrame]
+            val aggregateFunc = aggExpression.aggregateFunction
+            val substraitAggFuncName = ExpressionMappings.expressionsMap.get(aggregateFunc.getClass)
+            if (substraitAggFuncName.isEmpty) {
+              throw new GlutenNotSupportException(s"Not currently supported: $aggregateFunc.")
+            }
+
+            val childrenNodeList = aggregateFunc.children
+              .map(
+                ExpressionConverter
+                  .replaceWithExpressionTransformer(_, originalInputAttributes)
+                  .doTransform(context))
+              .asJava
+
+            val windowFunctionNode = ExpressionBuilder.makeWindowFunction(
+              AggregateFunctionsBuilder.create(context, aggExpression.aggregateFunction).toInt,
+              childrenNodeList,
+              columnName,
+              ConverterUtils.getTypeNode(aggExpression.dataType, aggExpression.nullable),
+              frame.upper,
+              frame.lower,
+              frame.frameType.sql,
+              originalInputAttributes.asJava
+            )
+            windowExpressionNodes.add(windowFunctionNode)
+          case wf @ (_: Lead | _: Lag) =>
+            val offsetWf = wf.asInstanceOf[FrameLessOffsetWindowFunction]
+            val frame = offsetWf.frame.asInstanceOf[SpecifiedWindowFrame]
+            val childrenNodeList = new JArrayList[ExpressionNode]()
+            childrenNodeList.add(
+              ExpressionConverter
+                .replaceWithExpressionTransformer(
+                  offsetWf.input,
+                  attributeSeq = originalInputAttributes)
+                .doTransform(context))
+            // Spark only accepts foldable offset. Converts it to LongType literal.
+            val offset = offsetWf.offset.eval(EmptyRow).asInstanceOf[Int]
+            // Velox only allows negative offset. WindowFunctionsBuilder#create converts
+            // lag/lead with negative offset to the function with positive offset. So just
+            // makes offsetNode store positive value.
+            val offsetNode = ExpressionBuilder.makeLiteral(Math.abs(offset.toLong), LongType, false)
+            childrenNodeList.add(offsetNode)
+            // NullType means Null is the default value. Don't pass it to native.
+            if (offsetWf.default.dataType != NullType) {
+              childrenNodeList.add(
+                ExpressionConverter
+                  .replaceWithExpressionTransformer(
+                    offsetWf.default,
+                    attributeSeq = originalInputAttributes)
+                  .doTransform(context))
+            }
+            val windowFunctionNode = ExpressionBuilder.makeWindowFunction(
+              WindowFunctionsBuilder.create(context, offsetWf).toInt,
+              childrenNodeList,
+              columnName,
+              ConverterUtils.getTypeNode(offsetWf.dataType, offsetWf.nullable),
+              frame.upper,
+              frame.lower,
+              frame.frameType.sql,
+              offsetWf.ignoreNulls,
+              originalInputAttributes.asJava
+            )
+            windowExpressionNodes.add(windowFunctionNode)
+          case wf @ NthValue(input, offset: Literal, ignoreNulls: Boolean) =>
+            val frame = wExpression.windowSpec.frameSpecification.asInstanceOf[SpecifiedWindowFrame]
+            val childrenNodeList = new JArrayList[ExpressionNode]()
+            childrenNodeList.add(
+              ExpressionConverter
+                .replaceWithExpressionTransformer(input, attributeSeq = originalInputAttributes)
+                .doTransform(context))
+            childrenNodeList.add(LiteralTransformer(offset).doTransform(context))
+            val windowFunctionNode = ExpressionBuilder.makeWindowFunction(
+              WindowFunctionsBuilder.create(context, wf).toInt,
+              childrenNodeList,
+              columnName,
+              ConverterUtils.getTypeNode(wf.dataType, wf.nullable),
+              frame.upper,
+              frame.lower,
+              frame.frameType.sql,
+              ignoreNulls,
+              originalInputAttributes.asJava
+            )
+            windowExpressionNodes.add(windowFunctionNode)
+          case wf @ NTile(buckets: Expression) =>
+            val frame = wExpression.windowSpec.frameSpecification.asInstanceOf[SpecifiedWindowFrame]
+            val childrenNodeList = new JArrayList[ExpressionNode]()
+            val literal = buckets.asInstanceOf[Literal]
+            childrenNodeList.add(LiteralTransformer(literal).doTransform(context))
+            val windowFunctionNode = ExpressionBuilder.makeWindowFunction(
+              WindowFunctionsBuilder.create(context, wf).toInt,
+              childrenNodeList,
+              columnName,
+              ConverterUtils.getTypeNode(wf.dataType, wf.nullable),
+              frame.upper,
+              frame.lower,
+              frame.frameType.sql,
+              originalInputAttributes.asJava
+            )
+            windowExpressionNodes.add(windowFunctionNode)
+          case wf: WindowFunction if UDFResolver.UDWFNames.contains(wf.getClass.getName) =>
+            val udwf = UDFResolver.getUdwfExpression(wf.getClass.getName)(wf.children)
+            val frame = wExpression.windowSpec.frameSpecification.asInstanceOf[SpecifiedWindowFrame]
+            val childrenNodeList = udwf.children
+              .map(
+                ExpressionConverter
+                  .replaceWithExpressionTransformer(_, originalInputAttributes)
+                  .doTransform(context))
+              .asJava
+            val windowFunctionNode = ExpressionBuilder.makeWindowFunction(
+              WindowFunctionsBuilder.create(context, udwf).toInt,
+              childrenNodeList,
+              columnName,
+              ConverterUtils.getTypeNode(udwf.dataType, udwf.nullable),
+              frame.upper,
+              frame.lower,
+              frame.frameType.sql,
+              originalInputAttributes.asJava
+            )
+            windowExpressionNodes.add(windowFunctionNode)
+          case _ =>
+            throw new GlutenNotSupportException(
+              "unsupported window function type: " +
+                wExpression.windowFunction)
+        }
     }
   }
 }

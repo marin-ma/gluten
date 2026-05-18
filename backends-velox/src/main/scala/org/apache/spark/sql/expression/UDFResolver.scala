@@ -25,7 +25,7 @@ import org.apache.spark.{SparkConf, SparkFiles}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression, Unevaluable}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression, Unevaluable, UnspecifiedFrame, WindowFrame, WindowFunction}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateFunction
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
@@ -69,6 +69,25 @@ case class UserDefinedAggregateFunction(
   }
 }
 
+case class UserDefinedWindowFunction(
+    name: String,
+    dataType: DataType,
+    nullable: Boolean,
+    children: Seq[Expression])
+  extends WindowFunction
+  with Unevaluable {
+  override def prettyName: String = name
+
+  // The actual frame is determined by the window spec in the SQL query.
+  // This is a stub so UserDefinedWindowFunction satisfies the WindowFunction trait.
+  override def frame: WindowFrame = UnspecifiedFrame
+
+  override protected def withNewChildrenInternal(
+      newChildren: IndexedSeq[Expression]): Expression = {
+    this.copy(children = newChildren)
+  }
+}
+
 trait UDFSignatureBase {
   val expressionType: ExpressionType
   val children: Seq[DataType]
@@ -89,6 +108,13 @@ case class UDAFSignature(
     variableArity: Boolean,
     allowTypeConversion: Boolean,
     intermediateAttrs: Seq[AttributeReference])
+  extends UDFSignatureBase
+
+case class UDWFSignature(
+    expressionType: ExpressionType,
+    children: Seq[DataType],
+    variableArity: Boolean,
+    allowTypeConversion: Boolean)
   extends UDFSignatureBase
 
 case class UDFExpression(
@@ -127,6 +153,11 @@ object UDFResolver extends Logging {
   // (udaf_name, arg1, arg2, ...) => return type, intermediate attributes
   private val UDAFMap =
     mutable.HashMap[String, mutable.ListBuffer[UDAFSignature]]()
+
+  val UDWFNames = mutable.HashSet[String]()
+  // (udwf_name, arg1, arg2, ...) => return type, isRangeFrame
+  private val UDWFMap =
+    mutable.HashMap[String, mutable.ListBuffer[UDWFSignature]]()
 
   private val LIB_EXTENSION = ".so"
 
@@ -210,6 +241,38 @@ object UDFResolver extends Logging {
       aggBufferAttributes)
     UDAFNames += name
     logInfo(s"Registered UDAF: $name($argTypes) -> $returnType")
+  }
+
+  def registerUDWF(
+      name: String,
+      returnType: Array[Byte],
+      argTypes: Array[Byte],
+      variableArity: Boolean,
+      allowTypeConversion: Boolean): Unit = {
+    registerUDWF(
+      name,
+      ConverterUtils.parseFromBytes(returnType),
+      ConverterUtils.parseFromBytes(argTypes),
+      variableArity,
+      allowTypeConversion)
+  }
+
+  private def registerUDWF(
+      name: String,
+      returnType: ExpressionType,
+      argTypes: ExpressionType,
+      variableArity: Boolean,
+      allowTypeConversion: Boolean): Unit = {
+    assert(argTypes.dataType.isInstanceOf[StructType])
+    val v =
+      UDWFMap.getOrElseUpdate(name, mutable.ListBuffer[UDWFSignature]())
+    v += UDWFSignature(
+      returnType,
+      argTypes.dataType.asInstanceOf[StructType].fields.map(_.dataType),
+      variableArity,
+      allowTypeConversion)
+    UDWFNames += name
+    logInfo(s"Registered UDWF: $name($argTypes) -> $returnType")
   }
 
   def parseName(name: String): (String, String) = {
@@ -379,6 +442,30 @@ object UDFResolver extends Logging {
           if (!allowTypeConversion && !sig.allowTypeConversion) children
           else applyCast(children, sig),
           sig.intermediateAttrs
+        )
+      case None =>
+        throw new GlutenNotSupportException(errorMessage)
+    }
+  }
+
+  def getUdwfExpression(name: String)(children: Seq[Expression]): UserDefinedWindowFunction = {
+    def errorMessage: String =
+      s"UDWF $name -> ${children.map(_.dataType.simpleString).mkString(", ")} is not registered."
+
+    val allowTypeConversion = checkAllowTypeConversion
+    val signatures =
+      UDWFMap.getOrElse(
+        name,
+        throw new GlutenNotSupportException(errorMessage)
+      )
+    signatures.find(sig => tryBind(sig, children.map(_.dataType), allowTypeConversion)) match {
+      case Some(sig) =>
+        UserDefinedWindowFunction(
+          name,
+          sig.expressionType.dataType,
+          sig.expressionType.nullable,
+          if (!allowTypeConversion && !sig.allowTypeConversion) children
+          else applyCast(children, sig)
         )
       case None =>
         throw new GlutenNotSupportException(errorMessage)

@@ -17,14 +17,15 @@
 
 #pragma once
 
-#include "udf/Udaf.h"
-#include "udf/Udf.h"
-
 namespace gluten {
+
+struct UdwfEntry;
+struct UdafEntry;
+struct UdfEntry;
 
 class UdfRegisterer {
  public:
-  ~UdfRegisterer() = default;
+  virtual ~UdfRegisterer() = default;
 
   // Returns the number of UDFs in populateUdfEntries.
   virtual int getNumUdf() = 0;
@@ -38,7 +39,7 @@ class UdfRegisterer {
 
 class UdafRegisterer {
  public:
-  ~UdafRegisterer() = default;
+  virtual ~UdafRegisterer() = default;
 
   // Returns the number of UDFs in populateUdafEntries.
   virtual int getNumUdaf() = 0;
@@ -50,4 +51,17 @@ class UdafRegisterer {
   virtual void registerSignatures() = 0;
 };
 
+class UdwfRegisterer {
+ public:
+  virtual ~UdwfRegisterer() = default;
+
+  // Returns the number of UDFs in populateUdwfEntries.
+  virtual int getNumUdwf() = 0;
+
+  // Populate the udfEntries, starting at the given index.
+  virtual void populateUdwfEntries(int& index, gluten::UdwfEntry* udwfEntries) = 0;
+
+  // Register all function signatures to velox.
+  virtual void registerSignatures() = 0;
+};
 } // namespace gluten

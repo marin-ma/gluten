@@ -29,6 +29,7 @@ const std::string kUdfResolverClassPath = "Lorg/apache/spark/sql/expression/UDFR
 static jclass udfResolverClass;
 static jmethodID registerUDFMethod;
 static jmethodID registerUDAFMethod;
+static jmethodID registerUDWFMethod;
 
 } // namespace
 
@@ -43,6 +44,8 @@ void gluten::initVeloxJniUDF(JNIEnv* env) {
   // methods
   registerUDFMethod = getMethodIdOrError(env, udfResolverClass, "registerUDF", "(Ljava/lang/String;[B[BZZ)V");
   registerUDAFMethod = getMethodIdOrError(env, udfResolverClass, "registerUDAF", "(Ljava/lang/String;[B[B[BZZ)V");
+  // optional window function registration (same signature as UDF)
+  registerUDWFMethod = getMethodIdOrError(env, udfResolverClass, "registerUDWF", "(Ljava/lang/String;[B[BZZ)V");
 }
 
 void gluten::finalizeVeloxJniUDF(JNIEnv* env) {
@@ -77,6 +80,15 @@ void gluten::jniRegisterFunctionSignatures(JNIEnv* env) {
           returnType,
           argTypes,
           intermediateType,
+          signature->variableArity,
+          signature->allowTypeConversion);
+    } else if (signature->isWindow) {
+      env->CallVoidMethod(
+          instance,
+          registerUDWFMethod,
+          name,
+          returnType,
+          argTypes,
           signature->variableArity,
           signature->allowTypeConversion);
     } else {

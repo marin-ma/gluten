@@ -25,6 +25,7 @@
 #include "Udaf.h"
 #include "Udf.h"
 #include "UdfLoader.h"
+#include "Udwf.h"
 #include "utils/Exception.h"
 #include "utils/Macros.h"
 #include "utils/StringUtil.h"
@@ -127,6 +128,31 @@ std::unordered_set<std::shared_ptr<UdfLoader::UdfSignature>> UdfLoader::getRegis
       free(udafEntries);
     } else {
       LOG(INFO) << "No UDAF found in " << libPath;
+    }
+
+    // Handle UDWF functions.
+    void* getNumUdwfSym = loadSymFromLibrary(handle, libPath, GLUTEN_TOSTRING(GLUTEN_GET_NUM_UDWF), false);
+    if (getNumUdwfSym) {
+      auto getNumUdwf = reinterpret_cast<int (*)()>(getNumUdwfSym);
+      int numUdwf = getNumUdwf();
+      UdwfEntry* udwfEntries = static_cast<UdwfEntry*>(malloc(sizeof(UdwfEntry) * numUdwf));
+      if (udwfEntries == nullptr) {
+        throw gluten::GlutenException("malloc failed");
+      }
+
+      void* getUdwfEntriesSym = loadSymFromLibrary(handle, libPath, GLUTEN_TOSTRING(GLUTEN_GET_UDWF_ENTRIES));
+      auto getUdwfEntries = reinterpret_cast<void (*)(UdwfEntry*)>(getUdwfEntriesSym);
+      getUdwfEntries(udwfEntries);
+
+      for (auto i = 0; i < numUdwf; ++i) {
+        const auto& entry = udwfEntries[i];
+        auto dataType = toSubstraitTypeStr(entry.dataType);
+        auto argTypes = toSubstraitTypeStr(entry.numArgs, entry.argTypes);
+        signatures_.insert(std::make_shared<UdfSignature>(entry.name, dataType, argTypes, entry.variableArity, entry.allowTypeConversion, true));
+      }
+      free(udwfEntries);
+    } else {
+      LOG(INFO) << "No Window functions found in " << libPath;
     }
   }
   return signatures_;

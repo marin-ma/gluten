@@ -35,9 +35,10 @@ class UdfLoader {
     std::string argTypes;
 
     std::string intermediateType{};
-
     bool variableArity;
     bool allowTypeConversion;
+    // mark if this signature is a window function
+    bool isWindow{false};
 
     UdfSignature(
         std::string name,
@@ -64,6 +65,20 @@ class UdfLoader {
           intermediateType(intermediateType),
           variableArity(variableArity),
           allowTypeConversion(allowTypeConversion) {}
+
+    UdfSignature(
+        std::string name,
+        std::string returnType,
+        std::string argTypes,
+        bool variableArity,
+        bool allowTypeConversion,
+        bool isWindow)
+        : name(name),
+          returnType(returnType),
+          argTypes(argTypes),
+          variableArity(variableArity),
+          allowTypeConversion(allowTypeConversion),
+          isWindow(isWindow) {}
 
     ~UdfSignature() = default;
   };

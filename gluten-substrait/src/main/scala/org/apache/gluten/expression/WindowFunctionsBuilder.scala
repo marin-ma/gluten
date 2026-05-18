@@ -18,7 +18,7 @@ package org.apache.gluten.expression
 
 import org.apache.gluten.exception.GlutenNotSupportException
 import org.apache.gluten.expression.ConverterUtils.FunctionConfig
-import org.apache.gluten.expression.ExpressionNames.{LAG, LEAD}
+import org.apache.gluten.expression.ExpressionNames.{LAG, LEAD, UDWF_PLACEHOLDER}
 import org.apache.gluten.substrait.SubstraitContext
 
 import org.apache.spark.sql.catalyst.expressions.{EmptyRow, Expression, Lag, Lead, WindowExpression, WindowFunction}
@@ -27,24 +27,27 @@ import scala.util.control.Breaks.{break, breakable}
 
 object WindowFunctionsBuilder {
   def create(context: SubstraitContext, windowFunc: WindowFunction): Long = {
-    val substraitFunc = windowFunc match {
+    val substraitFuncName = windowFunc match {
       // Handle lag with negative inputOffset, e.g., converts lag(c1, -1) to lead(c1, 1).
       // Spark uses `-inputOffset` as `offset` for Lag function.
       case lag: Lag if lag.offset.eval(EmptyRow).asInstanceOf[Int] > 0 =>
-        Some(LEAD)
+        LEAD
       // Handle lead with negative offset, e.g., converts lead(c1, -1) to lag(c1, 1).
       case lead: Lead if lead.offset.eval(EmptyRow).asInstanceOf[Int] < 0 =>
-        Some(LAG)
+        LAG
       case _ =>
-        ExpressionMappings.expressionsMap.get(windowFunc.getClass)
+        val nameOpt = ExpressionMappings.expressionsMap.get(windowFunc.getClass)
+        if (nameOpt.isEmpty) {
+          throw new GlutenNotSupportException(
+            s"not currently supported: ${windowFunc.getClass.getName}.")
+        }
+        nameOpt.get match {
+          case UDWF_PLACEHOLDER => windowFunc.prettyName
+          case name => name
+        }
     }
-    if (substraitFunc.isEmpty) {
-      throw new GlutenNotSupportException(
-        s"not currently supported: ${windowFunc.getClass.getName}.")
-    }
-
     val functionName =
-      ConverterUtils.makeFuncName(substraitFunc.get, Seq(windowFunc.dataType), FunctionConfig.OPT)
+      ConverterUtils.makeFuncName(substraitFuncName, Seq(windowFunc.dataType), FunctionConfig.OPT)
     context.registerFunction(functionName)
   }
 

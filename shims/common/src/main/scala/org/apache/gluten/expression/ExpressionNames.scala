@@ -378,6 +378,7 @@ object ExpressionNames {
   // A placeholder for native UDF functions
   final val UDF_PLACEHOLDER = "udf_placeholder"
   final val UDAF_PLACEHOLDER = "udaf_placeholder"
+  final val UDWF_PLACEHOLDER = "udwf_placeholder"
 
   // Spark StaticInvoke Catalyst util functions
   final val VARCHAR_TYPE_WRITE_SIDE_CHECK = "varchar_type_write_side_check"

@@ -18,3 +18,6 @@ target_link_libraries(myudf velox)
 
 add_library(myudaf SHARED "MyUDAF.cc")
 target_link_libraries(myudaf velox)
+
+add_library(sessiontimeout SHARED "SessionTimeout.cc")
+target_link_libraries(sessiontimeout velox)
