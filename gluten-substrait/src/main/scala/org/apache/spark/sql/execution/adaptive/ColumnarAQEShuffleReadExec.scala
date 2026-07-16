@@ -39,6 +39,8 @@ case class ColumnarAQEShuffleReadExec(
     delegate: Either[AQEShuffleReadExec, ShuffleQueryStageExec],
     executionMode: StageExecutionMode) extends UnaryExecNode {
 
+  override def nodeName: String = s"ColumnarAQEShuffleRead(${executionMode.name})"
+
   private val isAQEShuffleRead = delegate.isLeft
 
   private val aqeReader: AQEShuffleReadExec = {
