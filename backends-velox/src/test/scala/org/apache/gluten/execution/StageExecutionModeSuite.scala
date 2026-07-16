@@ -35,6 +35,7 @@ class StageExecutionModeSuite extends VeloxWholeStageTransformerSuite {
       .set("spark.shuffle.manager", "org.apache.spark.shuffle.sort.ColumnarShuffleManager")
       .set("spark.sql.shuffle.partitions", "2")
       .set(VeloxConfig.CUDF_ENABLE_VALIDATION.key, "false")
+      .set(VeloxConfig.CUDF_ENABLE_TABLE_SCAN.key, "false")
   }
 
   test("CPU shuffle mapper and GPU shuffle reader with AQE") {
@@ -45,14 +46,26 @@ class StageExecutionModeSuite extends VeloxWholeStageTransformerSuite {
       SQLConf.ANSI_ENABLED.key -> "false"
     ) {
 
-      withTempView("cpu_scan_left", "cpu_scan_right") {
-        Seq((1, "left-1"), (2, "left-2"), (3, "left-3"))
+      withTable("cpu_scan_left", "cpu_scan_right") {
+        Seq(
+          (1, "left-1"),
+          (2, "left-2"),
+          (3, "left-3"))
           .toDF("id", "left_value")
-          .createOrReplaceTempView("cpu_scan_left")
+          .write
+          .mode("overwrite")
+          .format("parquet")
+          .saveAsTable("cpu_scan_left")
 
-        Seq((1, "right-1"), (2, "right-2"), (4, "right-4"))
+        Seq(
+          (1, "right-1"),
+          (2, "right-2"),
+          (4, "right-4"))
           .toDF("id", "right_value")
-          .createOrReplaceTempView("cpu_scan_right")
+          .write
+          .mode("overwrite")
+          .format("parquet")
+          .saveAsTable("cpu_scan_right")
 
         val df = sql(
           """
