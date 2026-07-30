@@ -482,7 +482,6 @@ object GlutenConfig extends ConfigRegistry {
     GlutenCoreConfig.COLUMNAR_TASK_OFFHEAP_SIZE_IN_BYTES.key,
     COLUMNAR_MAX_BATCH_SIZE.key,
     SHUFFLE_WRITER_BUFFER_SIZE.key,
-    COLUMNAR_CUDF_ENABLED.key,
     SQLConf.LEGACY_SIZE_OF_NULL.key,
     SQLConf.LEGACY_STATISTICAL_AGGREGATE.key,
     SQLConf.JSON_GENERATOR_IGNORE_NULL_FIELDS.key,
@@ -527,7 +526,6 @@ object GlutenConfig extends ConfigRegistry {
     "spark.gluten.sql.columnar.backend.velox.cachePrefetchMinPct",
     "spark.gluten.sql.columnar.backend.velox.memoryPoolCapacityTransferAcrossTasks",
     "spark.gluten.sql.columnar.backend.velox.preferredBatchBytes",
-    "spark.gluten.sql.columnar.backend.velox.cudf.enableTableScan",
     "spark.gluten.sql.columnar.backend.velox.columnarBatchSerializerCompression"
   )
 

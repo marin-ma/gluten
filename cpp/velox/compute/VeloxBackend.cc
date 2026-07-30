@@ -78,6 +78,17 @@ using namespace facebook;
 namespace gluten {
 
 namespace {
+
+bool hasCudaRuntimeAndDevice() {
+#ifdef GLUTEN_ENABLE_GPU
+  int count = 0;
+  cudaError_t err = cudaGetDeviceCount(&count);
+  return err == cudaSuccess && count > 0;
+#else
+  return false;
+#endif
+}
+
 MemoryManager* veloxMemoryManagerFactory(const std::string& kind, std::unique_ptr<AllocationListener> listener) {
   return new VeloxMemoryManager(kind, std::move(listener), *VeloxBackend::get()->getBackendConf());
 }
@@ -86,14 +97,21 @@ void veloxMemoryManagerReleaser(MemoryManager* memoryManager) {
   delete memoryManager;
 }
 
-Runtime* veloxRuntimeFactory(
-    const std::string& kind,
-    MemoryManager* memoryManager,
-    ThreadManager* threadManager,
-    const std::unordered_map<std::string, std::string>& sessionConf) {
-  auto* vmm = dynamic_cast<VeloxMemoryManager*>(memoryManager);
-  GLUTEN_CHECK(vmm != nullptr, "Not a Velox memory manager");
-  return new VeloxRuntime(kind, vmm, threadManager, sessionConf);
+Runtime::Factory createVeloxRuntimeFactory(std::unordered_map<std::string, std::string> immutableConf) {
+  return [immutableConf = std::move(immutableConf)](
+             const std::string& kind,
+             MemoryManager* memoryManager,
+	     ThreadManager* threadManager,
+             const std::unordered_map<std::string, std::string>& sessionConf) -> Runtime* {
+    auto* vmm = dynamic_cast<VeloxMemoryManager*>(memoryManager);
+    GLUTEN_CHECK(vmm != nullptr, "Not a Velox memory manager");
+
+    std::unordered_map<std::string, std::string> confMap(immutableConf);
+    // immutableConf takes precedence; sessionConf only fills missing keys.
+    confMap.insert(sessionConf.begin(), sessionConf.end());
+
+    return new VeloxRuntime(kind, vmm, threadManager, confMap);
+  };
 }
 
 void veloxRuntimeReleaser(Runtime* runtime) {
@@ -147,7 +165,14 @@ void VeloxBackend::init(
   // Register factories.
   MemoryManager::registerFactory(kVeloxBackendKind, veloxMemoryManagerFactory, veloxMemoryManagerReleaser);
   ThreadManager::registerFactory(kVeloxBackendKind, veloxThreadManagerFactory, veloxThreadManagerReleaser);
-  Runtime::registerFactory(kVeloxBackendKind, veloxRuntimeFactory, veloxRuntimeReleaser);
+  // Set immutable configurations from backend conf.
+  const bool enableCudf = backendConf_->get<bool>(kCudfEnabled, kCudfEnabledDefault) && hasCudaRuntimeAndDevice();
+  const bool enableCudfTableScan =
+      enableCudf && backendConf_->get<bool>(kCudfEnableTableScan, kCudfEnableTableScanDefault);
+  std::unordered_map<std::string, std::string> immutableConf = {
+      {kCudfEnabled, enableCudf ? "true" : "false"}, {kCudfEnableTableScan, enableCudfTableScan ? "true" : "false"}};
+  Runtime::registerFactory(
+      kVeloxBackendKind, createVeloxRuntimeFactory(std::move(immutableConf)), veloxRuntimeReleaser);
 
   if (backendConf_->get<bool>(kDebugModeEnabled, false)) {
     LOG(INFO) << "VeloxBackend config:" << printConfig(backendConf_->rawConfigs());
@@ -194,7 +219,7 @@ void VeloxBackend::init(
 #endif
 
 #ifdef GLUTEN_ENABLE_GPU
-  if (backendConf_->get<bool>(kCudfEnabled, kCudfEnabledDefault)) {
+  if (enableCudf) {
     configureGpuTaskConcurrency(backendConf_->get<uint32_t>(kCudfConcurrentGpuTasks, kCudfConcurrentGpuTasksDefault));
     std::unordered_map<std::string, std::string> options = {
         {velox::cudf_velox::CudfConfig::kCudfEnabled, "true"},
