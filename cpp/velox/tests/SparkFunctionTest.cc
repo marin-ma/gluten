@@ -168,8 +168,7 @@ TEST_F(SparkFunctionTest, getMapValueSubfieldExtraction) {
 TEST_F(SparkFunctionTest, getMapValueSemantics) {
   auto maps = makeMapVector<std::string, int64_t>({{{"k", 1}}, {{"x", 2}}, {}});
   auto result = evaluate("get_map_value(c0, 'k')", makeRowVector({maps}));
-  facebook::velox::test::assertEqualVectors(
-      makeNullableFlatVector<int64_t>({1, std::nullopt, std::nullopt}), result);
+  facebook::velox::test::assertEqualVectors(makeNullableFlatVector<int64_t>({1, std::nullopt, std::nullopt}), result);
 
   auto intKeyed = makeMapVector<int32_t, std::string>({{{1, "a"}, {2, "b"}}, {{3, "c"}}});
   result = evaluate("get_map_value(c0, 2)", makeRowVector({intKeyed}));

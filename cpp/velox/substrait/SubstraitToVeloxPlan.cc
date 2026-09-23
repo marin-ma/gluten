@@ -1644,8 +1644,7 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
     const auto& enhancement = readRel.advanced_extension().enhancement();
     if (enhancement.Is<gluten::RequiredSubfieldsExtension>()) {
       gluten::RequiredSubfieldsExtension extension;
-      VELOX_USER_CHECK(
-          enhancement.UnpackTo(&extension), "Failed to unpack RequiredSubfieldsExtension");
+      VELOX_USER_CHECK(enhancement.UnpackTo(&extension), "Failed to unpack RequiredSubfieldsExtension");
       for (const auto& column : extension.columns()) {
         auto columnName = foldCase(column.column());
         VELOX_USER_CHECK(!columnName.empty(), "Required subfields with an empty column name");
@@ -1737,8 +1736,8 @@ core::PlanNodePtr SubstraitToVeloxPlanConverter::toVeloxPlan(const ::substrait::
   // A declared column that matched no regular scan column is not applied; the column is then read
   // whole, which is correct but not what the plan asked for.
   for (const auto& [columnName, subfields] : requiredSubfieldsByCol) {
-    LOG(WARNING) << "Map-key pruning: " << subfields.size() << " required subfields declared for column '"
-                 << columnName << "' matched no scan column and were ignored";
+    LOG(WARNING) << "Map-key pruning: " << subfields.size() << " required subfields declared for column '" << columnName
+                 << "' matched no scan column and were ignored";
   }
   auto outputType = ROW(std::move(outNames), std::move(veloxTypeList));
 
