@@ -138,6 +138,11 @@ class GlutenHiveUDFSuite extends GlutenQueryComparisonTest with SQLTestUtils {
   test("a partial generate over a hive udtf disables map-key pruning") {
     // The map is forwarded through the partial generate and read above it, so ScanMapKeyPruning
     // finds it still live when its Filter / Project chain ends and leaves the scan whole.
+    //
+    // The data is read through a temp view, like the other cases here, rather than a
+    // `parquet.\`path\`` reference: the latter resolves `parquet` as a database and is the first
+    // metastore access in this JVM, which initialises the shared Derby metastore with this
+    // suite's warehouse and leaves later Hive suites creating tables under it.
     withTempFunction("simpleUDTF") {
       sql(s"CREATE TEMPORARY FUNCTION simpleUDTF AS '${classOf[SimpleUDTF].getName}'")
       withTempPath {
@@ -147,18 +152,20 @@ class GlutenHiveUDFSuite extends GlutenQueryComparisonTest with SQLTestUtils {
             .selectExpr("id", "map('a', id, 'b', id * 2) as m")
             .write
             .parquet(path.getCanonicalPath)
-          withSQLConf(VeloxConfig.SCAN_MAP_KEY_PRUNING_ENABLED.key -> "true") {
-            runQueryAndCompare(
-              s"select col0, m['a'] from parquet.`${path.getCanonicalPath}` " +
-                "lateral view simpleUDTF(id) as col0") {
-              df =>
-                checkOperatorMatch[ColumnarPartialGenerateExec](df)
-                val declared = getExecutedPlan(df).collect {
-                  case scan: BasicScanExecTransformer => scan.requiredMapSubfields
-                }.filter(_.nonEmpty)
-                assert(
-                  declared.isEmpty,
-                  s"plan with a partial generate must not be pruned: $declared")
+          withTempView("map_udtf_src") {
+            spark.read.parquet(path.getCanonicalPath).createOrReplaceTempView("map_udtf_src")
+            withSQLConf(VeloxConfig.SCAN_MAP_KEY_PRUNING_ENABLED.key -> "true") {
+              runQueryAndCompare(
+                "select col0, m['a'] from map_udtf_src lateral view simpleUDTF(id) as col0") {
+                df =>
+                  checkOperatorMatch[ColumnarPartialGenerateExec](df)
+                  val declared = getExecutedPlan(df).collect {
+                    case scan: BasicScanExecTransformer => scan.requiredMapSubfields
+                  }.filter(_.nonEmpty)
+                  assert(
+                    declared.isEmpty,
+                    s"plan with a partial generate must not be pruned: $declared")
+              }
             }
           }
       }
