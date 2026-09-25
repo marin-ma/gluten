@@ -138,11 +138,6 @@ class GlutenHiveUDFSuite extends GlutenQueryComparisonTest with SQLTestUtils {
   test("a partial generate over a hive udtf disables map-key pruning") {
     // The map is forwarded through the partial generate and read above it, so ScanMapKeyPruning
     // finds it still live when its Filter / Project chain ends and leaves the scan whole.
-    //
-    // The data is read through a temp view, like the other cases here, rather than a
-    // `parquet.\`path\`` reference: the latter resolves `parquet` as a database and is the first
-    // metastore access in this JVM, which initialises the shared Derby metastore with this
-    // suite's warehouse and leaves later Hive suites creating tables under it.
     withTempFunction("simpleUDTF") {
       sql(s"CREATE TEMPORARY FUNCTION simpleUDTF AS '${classOf[SimpleUDTF].getName}'")
       withTempPath {
