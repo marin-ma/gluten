@@ -160,6 +160,9 @@ class VeloxTransformerApi extends TransformerApi with Logging {
           RequiredSubfieldsExtension.ColumnSubfields.newBuilder().setColumn(column)
         paths.foreach {
           path =>
+            require(
+              path.column == column,
+              s"Subfield path $path declared under column $column")
             val subfield = RequiredSubfieldsExtension.Subfield.newBuilder()
             path.elements.foreach {
               element =>

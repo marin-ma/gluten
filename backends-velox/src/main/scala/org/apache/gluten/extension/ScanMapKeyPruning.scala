@@ -155,7 +155,7 @@ object ScanMapKeyPruning extends Rule[SparkPlan] {
     plan.transformUp {
       case scan: BasicScanExecTransformer if declarationsByScan.containsKey(scan) =>
         val subfields = declarationsByScan.get(scan)
-        logInfo(s"Applying scan map-key pruning: $subfields")
+        logDebug(s"Applying scan map-key pruning: $subfields")
         val newScan = scan.withRequiredMapSubfields(subfields)
         newScan.copyTagsFrom(scan)
         newScan
@@ -250,7 +250,7 @@ object ScanMapKeyPruning extends Rule[SparkPlan] {
       case g: GenerateExec => applyGenerate(g, g.generator)
     }
     // Still live when the chain ends: the attribute (or an alias holding map data of it) reaches
-    // an operator the rule does not pathsToDeclare, or the fragment's output. Stay whole.
+    // an operator the rule does not follow, or the fragment's output. Stay whole.
     if (paths.abandoned || liveIds.nonEmpty) {
       return None
     }
@@ -400,7 +400,8 @@ object ScanMapKeyPruning extends Rule[SparkPlan] {
    * the plan is built, so the declaration and the schema always agree, including for non-ASCII
    * names that only Java's full lowercasing changes. Transport is structural, so no character of a
    * name or key needs quoting; toString on the result gives the Velox Subfield syntax, for example
-   * `c.m["k1"].f1`.
+   * `c.m["k1"].f1`. The paths are sorted by that rendering, so two scans declaring the same set
+   * compare equal whatever order the walk found the paths in, and exchange reuse is not lost.
    */
   private def renderSubfieldPaths(
       attr: Attribute,
@@ -415,6 +416,6 @@ object ScanMapKeyPruning extends Rule[SparkPlan] {
             case other => other
           })
     }
-    (colName, rendered)
+    (colName, rendered.sortBy(_.toString))
   }
 }

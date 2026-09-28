@@ -335,6 +335,22 @@ class ScanMapKeyPruningSuite extends VeloxWholeStageTransformerSuite {
       requires = Some(classOf[ReusedExchangeExec])
     ),
     Case(
+      // The two branches reference the keys in opposite order, so the walk finds the same paths
+      // in a different order. Spark canonicalizes the rest of the plan order-free, so only a
+      // declaration kept in walk order would make the scans differ and lose the reuse.
+      "same declaration found in another order keeps exchange reuse",
+      mapTable,
+      p =>
+        s"SELECT sum(t1.x + t2.x) FROM " +
+          s"(SELECT id, m['a'].t AS x FROM parquet.`$p` " +
+          s"WHERE m['a'].s = 'v3' AND m['b'].s = 'x') t1 " +
+          s"JOIN (SELECT id, m['a'].t AS x FROM parquet.`$p` " +
+          s"WHERE m['b'].s = 'x' AND m['a'].s = 'v3') t2 ON t1.id = t2.id",
+      Seq(m("m[\"a\"].s", "m[\"a\"].t", "m[\"b\"].s")),
+      conf = Seq(noBroadcast),
+      requires = Some(classOf[ReusedExchangeExec])
+    ),
+    Case(
       "union of keyed projections prunes each branch",
       mapTable,
       p =>
