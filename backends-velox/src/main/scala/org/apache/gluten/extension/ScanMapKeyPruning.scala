@@ -63,7 +63,10 @@ import scala.util.control.NonFatal
  *
  * Supported, that is, pruned:
  *   - filters on constant-key lookups, `m['a'].s = 'v3'`, `m[1].t > 0`, `element_at(m, 'a')`,
- *     including the `isnotnull(m)` Spark infers next to them;
+ *     including the `isnotnull(m)` Spark infers next to them. Such a filter reaches Velox as the
+ *     scan's remaining filter, whose subfields Velox adds to the declaration; the Velox backend
+ *     emits both lookups as the pushdown-capable `get_map_value`, so they contribute `m["a"]`
+ *     rather than the bare column (see VeloxSparkPlanExecApi.genElementAtTransformer);
  *   - keyed values projected or aggregated, `SELECT m['a'].t`, `sum(m['a'].t)`, also under a
  *     `count(*)`, a `LIMIT`, an `ORDER BY ... LIMIT`, a `UNION ALL` of such projections, a write of
  *     such values, a UDF or script transformation applied to them, or a join whose sides only read

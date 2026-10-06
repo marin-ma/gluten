@@ -485,6 +485,20 @@ class ScanMapKeyPruningSuite extends VeloxWholeStageTransformerSuite {
       )
   }
 
+  /** The set of map keys per row of a plan whose single output column is a string-keyed map. */
+  private def keysPerRow(plan: SparkPlan): Set[Set[String]] =
+    plan
+      .executeCollect()
+      .map(_.getMap(0).keyArray().toArray[UTF8String](StringType).map(_.toString).toSet)
+      .toSet
+
+  /** 'plan' with every native scan declaring only key "a" of column m, bypassing the rule. */
+  private def declareKeyA(plan: SparkPlan): SparkPlan = plan.transform {
+    case scan: BasicScanExecTransformer =>
+      scan.withRequiredMapSubfields(
+        Map("m" -> Seq(SubfieldPath("m", Seq(SubfieldElement.StringKey("a"))))))
+  }
+
   test("the native reader applies a declaration: undeclared keys are not read") {
     // Attaches a declaration to the scan directly, bypassing the rule, and reads the map whole.
     // Only the declared key may come back; if the transport or the native side ignored the
@@ -493,20 +507,37 @@ class ScanMapKeyPruningSuite extends VeloxWholeStageTransformerSuite {
       path =>
         withSQLConf("spark.sql.adaptive.enabled" -> "false") {
           val df = spark.read.parquet(path).select("m")
-          def keysPerRow(plan: SparkPlan): Set[Set[String]] =
-            plan
-              .executeCollect()
-              .map(_.getMap(0).keyArray().toArray[UTF8String](StringType).map(_.toString).toSet)
-              .toSet
           val plan = df.queryExecution.executedPlan
           assert(planHas(df, classOf[BasicScanExecTransformer]), s"expected a native scan:\n$plan")
           assert(keysPerRow(plan) == Set(Set("a", "b", "c")))
-          val pruned = plan.transform {
-            case scan: BasicScanExecTransformer =>
-              scan.withRequiredMapSubfields(
-                Map("m" -> Seq(SubfieldPath("m", Seq(SubfieldElement.StringKey("a"))))))
-          }
+          val pruned = declareKeyA(plan)
           assert(keysPerRow(pruned) == Set(Set("a")), s"declaration not applied:\n$pruned")
+        }
+    }
+  }
+
+  test("a keyed filter at the scan keeps the declaration effective, element_at included") {
+    // The filter is pushed to the scan and reaches Velox as the scan's remaining filter. Velox
+    // adds the subfields that filter reads to the declaration: for a pushdown-capable lookup the
+    // key path, for anything else the bare column, which keeps every entry. The Velox backend
+    // emits element_at on a map as get_map_value, so both spellings contribute m["a"].s and only
+    // the declared key comes back.
+    mapTable {
+      path =>
+        withSQLConf("spark.sql.adaptive.enabled" -> "false") {
+          Seq("element_at(m, 'a').s = 'v5'", "m['a'].s = 'v5'").foreach {
+            predicate =>
+              val df = spark.read.parquet(path).where(predicate).select("m")
+              val plan = df.queryExecution.executedPlan
+              assert(
+                planHas(df, classOf[BasicScanExecTransformer]),
+                s"expected a native scan:\n$plan")
+              assert(keysPerRow(plan) == Set(Set("a", "b", "c")), predicate)
+              val pruned = declareKeyA(plan)
+              assert(
+                keysPerRow(pruned) == Set(Set("a")),
+                s"$predicate read undeclared keys:\n$pruned")
+          }
         }
     }
   }

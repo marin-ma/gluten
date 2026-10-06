@@ -1133,6 +1133,26 @@ class VeloxSparkPlanExecApi extends SparkPlanExecApi with Logging {
     GenericExpressionTransformer(substraitExprName, Seq(left, right), original)
   }
 
+  /**
+   * ElementAt on a map is emitted as get_map_value, like GetMapValue, so that a scan remaining
+   * filter such as element_at(m, 'k').x = 1 extracts the subfield m["k"] and map-key pruning stays
+   * effective; Velox's element_at also serves arrays and is not subfield-pushdown capable, so it
+   * would add the bare column m and keep every entry. The two agree on maps: the value under the
+   * key, or NULL when it is absent. In ANSI mode a missing key is an error instead, and the mapped
+   * element_at is kept.
+   */
+  override def genElementAtTransformer(
+      substraitExprName: String,
+      left: ExpressionTransformer,
+      right: ExpressionTransformer,
+      original: ElementAt): ExpressionTransformer = {
+    if (original.left.dataType.isInstanceOf[MapType] && !original.failOnError) {
+      GenericExpressionTransformer(ExpressionNames.GET_MAP_VALUE, Seq(left, right), original)
+    } else {
+      GenericExpressionTransformer(substraitExprName, Seq(left, right), original)
+    }
+  }
+
   override def genStringToMapTransformer(
       substraitExprName: String,
       children: Seq[ExpressionTransformer],
