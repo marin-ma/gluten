@@ -28,7 +28,7 @@ class VeloxWholeStageDumper final : public WholeStageDumper {
       const SparkTaskInfo& taskInfo,
       const std::string& saveDir,
       int64_t batchSize,
-      facebook::velox::memory::MemoryPool* aggregatePool);
+      VeloxMemoryManager* memoryManager);
 
   void dumpConf(const std::unordered_map<std::string, std::string>& confMap) override;
 
@@ -45,7 +45,9 @@ class VeloxWholeStageDumper final : public WholeStageDumper {
   std::string saveDir_;
   int64_t batchSize_;
 
-  facebook::velox::memory::MemoryPool* pool_;
+  // Owned by the Runtime's Java-side counterpart and released after the Runtime, so it outlives the dumper and
+  // every iterator / batch created by the Runtime.
+  VeloxMemoryManager* memoryManager_;
 };
 
 } // namespace gluten
