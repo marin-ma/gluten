@@ -51,9 +51,13 @@ class RowVectorBatchIterator final : public ColumnarBatchIterator {
 
 class VeloxWholeStageDumperTest : public ::testing::Test, public test::VectorTestBase {
  protected:
-  static void SetUpTestCase() {
+  static void SetUpTestSuite() {
     VeloxBackend::create(AllocationListener::noop(), {});
     memory::MemoryManager::testingSetInstance(memory::MemoryManager::Options{});
+  }
+
+  static void TearDownTestSuite() {
+    VeloxBackend::get()->tearDown();
   }
 
   void SetUp() override {
@@ -101,6 +105,7 @@ TEST_F(VeloxWholeStageDumperTest, dumpedBatchesOutliveReaderIterator) {
   ASSERT_TRUE(std::filesystem::exists(saveDir_ / "data_1_2_4_0.parquet"));
 
   const auto leafPool = vmm_->getLeafMemoryPool();
+  const auto baselineBytes = leafPool->usedBytes();
   std::vector<std::shared_ptr<ColumnarBatch>> batches;
   int64_t numRows = 0;
   while (auto cb = reader->next()) {
@@ -110,15 +115,18 @@ TEST_F(VeloxWholeStageDumperTest, dumpedBatchesOutliveReaderIterator) {
     batches.push_back(std::move(cb));
   }
   ASSERT_EQ(numRows, kNumBatches * kRowsPerBatch);
-  ASSERT_GT(leafPool->usedBytes(), 0);
+  const auto bytesHeldByBatches = leafPool->usedBytes();
+  ASSERT_GT(bytesHeldByBatches, baselineBytes);
 
-  // Destroying the reader must not destroy the pool backing the batches.
+  // Destroying the reader must not destroy the pool backing the batches, nor free the memory they hold.
   reader.reset();
-  ASSERT_GT(leafPool->usedBytes(), 0);
+  ASSERT_GE(leafPool->usedBytes(), bytesHeldByBatches);
 
-  // Releasing the batches after the reader is gone must be safe and must return all memory to the pool.
+  // Releasing the batches after the reader is gone must be safe,
+  // and must give the memory back to the pool, which is still alive.
   batches.clear();
-  ASSERT_EQ(leafPool->usedBytes(), 0);
+  ASSERT_LT(leafPool->usedBytes(), bytesHeldByBatches);
+  ASSERT_EQ(leafPool->usedBytes(), baselineBytes);
 }
 
 } // namespace gluten

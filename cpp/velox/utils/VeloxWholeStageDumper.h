@@ -45,7 +45,7 @@ class VeloxWholeStageDumper final : public WholeStageDumper {
   std::string saveDir_;
   int64_t batchSize_;
 
-  // Owned by the Runtime's Java-side counterpart and released after the Runtime, so it outlives the dumper and
+  // Owned by the Runtime / JNI wrapper and released after the Runtime, so it outlives the dumper and
   // every iterator / batch created by the Runtime.
   VeloxMemoryManager* memoryManager_;
 };
