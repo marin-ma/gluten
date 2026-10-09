@@ -18,6 +18,7 @@
 #pragma once
 
 #include "compute/VeloxRuntime.h"
+#include "memory/VeloxMemoryManager.h"
 #include "utils/WholeStageDumper.h"
 
 namespace gluten {
