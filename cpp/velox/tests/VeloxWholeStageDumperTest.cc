@@ -100,12 +100,15 @@ TEST_F(VeloxWholeStageDumperTest, dumpedBatchesOutliveReaderIterator) {
   const SparkTaskInfo taskInfo{/*stageId=*/1, /*partitionId=*/2, /*taskId=*/3, /*vId=*/4};
   VeloxWholeStageDumper dumper(taskInfo, saveDir_.string(), kRowsPerBatch, vmm_.get());
 
+  // Capture the baseline before the reader exists: the reader allocates its own state from the leaf pool as soon
+  // as it is created, and all of it must be gone by the end of the test.
+  const auto leafPool = vmm_->getLeafMemoryPool();
+  const auto baselineBytes = leafPool->usedBytes();
+
   auto reader = dumper.dumpInputIterator(0, input);
   ASSERT_NE(reader, nullptr);
   ASSERT_TRUE(std::filesystem::exists(saveDir_ / "data_1_2_4_0.parquet"));
 
-  const auto leafPool = vmm_->getLeafMemoryPool();
-  const auto baselineBytes = leafPool->usedBytes();
   std::vector<std::shared_ptr<ColumnarBatch>> batches;
   int64_t numRows = 0;
   while (auto cb = reader->next()) {
