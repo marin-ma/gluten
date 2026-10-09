@@ -115,12 +115,13 @@ TEST_F(VeloxWholeStageDumperTest, dumpedBatchesOutliveReaderIterator) {
     batches.push_back(std::move(cb));
   }
   ASSERT_EQ(numRows, kNumBatches * kRowsPerBatch);
+  ASSERT_GT(leafPool->usedBytes(), baselineBytes);
+
+  // Destroying the reader frees the reader's own buffers, but must not destroy the pool backing the batches,
+  // so the memory held by the batches is still accounted for.
+  reader.reset();
   const auto bytesHeldByBatches = leafPool->usedBytes();
   ASSERT_GT(bytesHeldByBatches, baselineBytes);
-
-  // Destroying the reader must not destroy the pool backing the batches, nor free the memory they hold.
-  reader.reset();
-  ASSERT_GE(leafPool->usedBytes(), bytesHeldByBatches);
 
   // Releasing the batches after the reader is gone must be safe,
   // and must give the memory back to the pool, which is still alive.
