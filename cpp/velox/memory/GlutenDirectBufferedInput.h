@@ -33,11 +33,14 @@ namespace gluten {
 /// the decision must be visible across all of them.
 ///
 /// The reader names the streams of the lazily loaded columns (projected, no
-/// filter) through setLazyStreams(). Their loads are planned but not
-/// scheduled ("held") until either the hint marks every lazy column as needed
-/// or one of their streams is read before the hint (for example by the
-/// remaining filter), which marks that stream's columns as needed. A needed
-/// column is prefetched like any other with every following row group.
+/// filter) through setLazyStreams(). Their loads are planned per stream, never
+/// coalesced across streams, and not scheduled ("held") until either the hint
+/// marks every lazy column as needed or one of the streams is read before the
+/// hint (for example by the remaining filter), which marks that stream alone
+/// as needed. Parquet lays a row group's column chunks out back to back, so a
+/// load spanning several lazy columns would drag the neighbours of the one
+/// stream read into the synchronous load and make them eager afterwards. A
+/// needed stream is prefetched like any other with every following row group.
 class LazyColumnLoadState {
  public:
   using LoadPtr = std::shared_ptr<facebook::velox::dwio::common::DirectCoalescedLoad>;
@@ -49,23 +52,23 @@ class LazyColumnLoadState {
   /// True if the stream is lazy and no one has shown it is needed yet.
   bool isDeferred(int32_t streamId) const;
 
-  /// Remembers a planned load of deferred streams so that it can be scheduled
-  /// later. 'streamIds' are the streams it covers.
-  void hold(LoadPtr load, std::vector<int32_t> streamIds);
+  /// Remembers a planned load of the deferred stream 'streamId' so that it can
+  /// be scheduled later.
+  void hold(LoadPtr load, int32_t streamId);
 
   /// Marks every lazy column as needed. Returns the held loads still alive, to
   /// be scheduled by the caller.
   std::vector<LoadPtr> markAllNeeded();
 
-  /// If 'load' is held, marks the streams it covers as needed and returns the
-  /// other held loads that cover one of those streams, to be scheduled by the
-  /// caller. Returns an empty vector if 'load' is not held.
+  /// If 'load' is held, marks its stream as needed and returns the other held
+  /// loads of that stream, to be scheduled by the caller. Returns an empty
+  /// vector if 'load' is not held.
   std::vector<LoadPtr> markNeededByRead(const facebook::velox::dwio::common::DirectCoalescedLoad* load);
 
  private:
   struct HeldLoad {
     std::weak_ptr<facebook::velox::dwio::common::DirectCoalescedLoad> load;
-    std::vector<int32_t> streamIds;
+    int32_t streamId;
   };
 
   mutable std::mutex mutex_;
@@ -105,12 +108,12 @@ class GlutenDirectBufferedInput : public facebook::velox::dwio::common::DirectBu
   void hintLazyColumnsNeeded() override;
 
   /// With deferral on: prefetches every stream that is not deferred and plans,
-  /// without scheduling, the loads of the deferred ones. Otherwise the same as
+  /// without scheduling, one load per deferred stream. Otherwise the same as
   /// DirectBufferedInput::load().
   void load(const facebook::velox::dwio::common::LogType logType) override;
 
-  /// A stream of a held load is being read before the hint: its columns are
-  /// needed, so their other held loads are scheduled now.
+  /// A held stream is being read before the hint: it is needed, so its other
+  /// held loads are scheduled now.
   std::shared_ptr<facebook::velox::dwio::common::DirectCoalescedLoad> coalescedLoad(
       const facebook::velox::dwio::common::SeekableInputStream* stream) override;
 

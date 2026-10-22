@@ -220,24 +220,39 @@ TEST_F(GlutenDirectBufferedInputTest, readBeforeHintMarksColumnNeeded) {
   auto held1Stream3 = loadOf(*direct1, 1, 3);
   ASSERT_NE(held1Stream2, nullptr);
   ASSERT_NE(held1Stream3, nullptr);
-  // Streams 2 and 3 are adjacent, so they share one held load.
-  EXPECT_EQ(held1Stream2, held1Stream3);
+  // Streams 2 and 3 are adjacent, yet each deferred stream gets its own held
+  // load: a read of one must not drag the other in.
+  EXPECT_NE(held1Stream2, held1Stream3);
   EXPECT_EQ(held1Stream2->state(), CoalescedLoad::State::kPlanned);
+  EXPECT_EQ(held1Stream3->state(), CoalescedLoad::State::kPlanned);
 
   // Reading stream 2 of row group 0 before any hint (as the remaining filter
-  // would) loads it synchronously and marks its columns as needed, so the held
-  // load of row group 1 covering the same streams starts in the background.
+  // would) loads it synchronously and marks only stream 2 as needed, so the
+  // held load of stream 2 in row group 1 starts in the background while
+  // stream 3 stays held.
   EXPECT_EQ(readAll(*streams0[1]), expected(0, 2));
   EXPECT_TRUE(waitUntilNotPlanned(held1Stream2));
+  EXPECT_EQ(held1Stream3->state(), CoalescedLoad::State::kPlanned);
+  EXPECT_EQ(loadOf(*direct0, 0, 3)->state(), CoalescedLoad::State::kPlanned);
 
-  // A later row group prefetches the now needed streams eagerly.
+  // A later row group prefetches the now needed stream eagerly and still holds
+  // the other one.
   auto rowGroup2 = input->clone();
   auto streams2 = enqueueRowGroup(*rowGroup2, 0);
   rowGroup2->load(LogType::TEST);
-  auto load2 = loadOf(*dynamic_cast<DirectBufferedInput*>(rowGroup2.get()), 0, 2);
-  ASSERT_NE(load2, nullptr);
-  EXPECT_TRUE(waitUntilNotPlanned(load2));
+  auto* direct2 = dynamic_cast<DirectBufferedInput*>(rowGroup2.get());
+  auto load2Stream2 = loadOf(*direct2, 0, 2);
+  auto load2Stream3 = loadOf(*direct2, 0, 3);
+  ASSERT_NE(load2Stream2, nullptr);
+  ASSERT_NE(load2Stream3, nullptr);
+  EXPECT_TRUE(waitUntilNotPlanned(load2Stream2));
+  EXPECT_EQ(load2Stream3->state(), CoalescedLoad::State::kPlanned);
+  // The hint releases what is still held.
+  input->hintLazyColumnsNeeded();
+  EXPECT_TRUE(waitUntilNotPlanned(held1Stream3));
+  EXPECT_TRUE(waitUntilNotPlanned(load2Stream3));
   EXPECT_EQ(readAll(*streams2[2]), expected(0, 3));
+  EXPECT_EQ(readAll(*streams1[2]), expected(1, 3));
 }
 
 // Deferral on but the reader named no lazy streams: load() falls through to

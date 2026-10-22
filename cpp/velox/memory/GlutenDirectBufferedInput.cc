@@ -20,6 +20,7 @@
 #include <folly/executors/QueuedImmediateExecutor.h>
 
 #include <algorithm>
+#include <map>
 
 namespace gluten {
 
@@ -46,13 +47,13 @@ bool LazyColumnLoadState::isDeferred(int32_t streamId) const {
   return !allNeeded_ && lazyStreamIds_.count(streamId) != 0 && neededStreamIds_.count(streamId) == 0;
 }
 
-void LazyColumnLoadState::hold(LoadPtr load, std::vector<int32_t> streamIds) {
+void LazyColumnLoadState::hold(LoadPtr load, int32_t streamId) {
   std::lock_guard<std::mutex> l(mutex_);
   // Drop the loads whose input is gone (row group released or task ended).
   held_.erase(
       std::remove_if(held_.begin(), held_.end(), [](const HeldLoad& held) { return held.load.expired(); }),
       held_.end());
-  held_.push_back({std::move(load), std::move(streamIds)});
+  held_.push_back({std::move(load), streamId});
 }
 
 std::vector<LazyColumnLoadState::LoadPtr> LazyColumnLoadState::markAllNeeded() {
@@ -84,8 +85,8 @@ std::vector<LazyColumnLoadState::LoadPtr> LazyColumnLoadState::markNeededByRead(
   if (read == nullptr) {
     return {};
   }
-  neededStreamIds_.insert(read->streamIds.begin(), read->streamIds.end());
-  // Schedule the other held loads covering a now needed stream; keep the rest.
+  neededStreamIds_.insert(read->streamId);
+  // Schedule the other held loads of the now needed stream; keep the rest.
   std::vector<LoadPtr> loads;
   std::vector<HeldLoad> stillHeld;
   for (auto& held : held_) {
@@ -93,9 +94,7 @@ std::vector<LazyColumnLoadState::LoadPtr> LazyColumnLoadState::markNeededByRead(
     if (!alive || alive.get() == load) {
       continue;
     }
-    const bool needed = std::any_of(
-        held.streamIds.begin(), held.streamIds.end(), [&](int32_t id) { return neededStreamIds_.count(id) != 0; });
-    if (needed) {
+    if (neededStreamIds_.count(held.streamId) != 0) {
       loads.push_back(std::move(alive));
     } else {
       stillHeld.push_back(std::move(held));
@@ -233,20 +232,25 @@ void GlutenDirectBufferedInput::load(const LogType logType) {
   }
   auto byOffset = [](const LoadRequest* left, const LoadRequest* right) { return *left < *right; };
   std::sort(eager.begin(), eager.end(), byOffset);
-  std::sort(deferred.begin(), deferred.end(), byOffset);
 
   // Everything the scan needs now goes to the IO threads right away. The
-  // deferred streams are coalesced among themselves, so an eager read never
-  // spans a deferred chunk that lies between two eager ones.
+  // deferred streams are not in this set, so an eager read never spans a
+  // deferred chunk that lies between two eager ones.
   for (auto& load : planLoads(eager, groupRequests(eager, /*prefetch=*/true))) {
     prefetchLoad(load);
   }
-  for (auto& load : planLoads(deferred, groupRequests(deferred, /*prefetch=*/true))) {
-    std::vector<int32_t> streamIds;
-    for (const auto& request : load->requests()) {
-      streamIds.push_back(request.trackingId.id());
+  // One planned load per deferred stream, never coalesced across streams: the
+  // first read of a stream before the hint must load that stream only and
+  // mark that stream only.
+  std::map<int32_t, std::vector<LoadRequest*>> deferredByStream;
+  for (auto* request : deferred) {
+    deferredByStream[request->trackingId.id()].push_back(request);
+  }
+  for (auto& [streamId, requests] : deferredByStream) {
+    std::sort(requests.begin(), requests.end(), byOffset);
+    for (auto& load : planLoads(requests, groupRequests(requests, /*prefetch=*/true))) {
+      lazyState_->hold(load, streamId);
     }
-    lazyState_->hold(load, std::move(streamIds));
   }
 }
 
